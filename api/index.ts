@@ -1,7 +1,7 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/index.js';
-import { getDingTalkConfig } from '../server/services/dingtalk-notifier.js';
+import { getDingTalkConfig, sendDingTalkText } from '../server/services/dingtalk-notifier.js';
 import { JsonStore } from '../server/store.js';
 
 const store = new JsonStore(join(tmpdir(), 'lp-sentinel-vercel.json'), { positionStorage: 'indexeddb' });
@@ -24,5 +24,6 @@ await store.update((draft) => {
 export default createApp({
   store,
   monitorToken,
+  testNotification: dingtalk.config ? () => sendDingTalkText(`[LP Sentinel] Vercel 钉钉预警通道测试成功 · ${new Date().toISOString()}`, dingtalk.config!) : undefined,
   runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: cloudNotifications, notificationProvider: cloudNotifications ? 'dingtalk-openapi' : 'none', positionStorage: 'indexeddb' },
 });

@@ -65,7 +65,7 @@ async function getAccessToken(config: DingTalkConfig, fetcher: typeof fetch): Pr
   return accessToken;
 }
 
-export async function sendDingTalkAlert(position: Position, boundary: AlertBoundary, config: DingTalkConfig, fetcher: typeof fetch = fetch): Promise<void> {
+export async function sendDingTalkText(content: string, config: DingTalkConfig, fetcher: typeof fetch = fetch): Promise<void> {
   const accessToken = await getAccessToken(config, fetcher);
   const response = await fetcher(OTO_MESSAGE_URL, {
     method: 'POST',
@@ -77,7 +77,7 @@ export async function sendDingTalkAlert(position: Position, boundary: AlertBound
       robotCode: config.robotCode,
       userIds: config.userIds,
       msgKey: 'sampleText',
-      msgParam: JSON.stringify({ content: buildAlertContent(position, boundary) }),
+      msgParam: JSON.stringify({ content }),
     }),
     signal: AbortSignal.timeout(10_000),
   });
@@ -87,4 +87,8 @@ export async function sendDingTalkAlert(position: Position, boundary: AlertBound
   if (invalid > 0) throw new Error(`钉钉消息发送失败：${invalid} 个接收人无效`);
   if (throttled > 0) throw new Error(`钉钉消息发送受限：${throttled} 个接收人被限流`);
   if (typeof body.processQueryKey !== 'string' || !body.processQueryKey) throw new Error('钉钉消息发送响应缺少 processQueryKey');
+}
+
+export async function sendDingTalkAlert(position: Position, boundary: AlertBoundary, config: DingTalkConfig, fetcher: typeof fetch = fetch): Promise<void> {
+  return sendDingTalkText(buildAlertContent(position, boundary), config, fetcher);
 }

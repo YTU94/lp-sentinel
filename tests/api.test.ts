@@ -160,4 +160,20 @@ describe('LP Sentinel API', () => {
       .expect(200);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
+
+  it('protects the Vercel notification test endpoint with the same monitor token', async () => {
+    const testNotification = vi.fn().mockResolvedValue(undefined);
+    const app = createApp({
+      store,
+      testNotification,
+      monitorToken: '0123456789abcdef0123456789abcdef',
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+    });
+
+    await request(app).post('/api/notifications/test').expect(401);
+    await request(app).post('/api/notifications/test')
+      .set('Authorization', 'Bearer 0123456789abcdef0123456789abcdef')
+      .expect(200, { sent: true });
+    expect(testNotification).toHaveBeenCalledTimes(1);
+  });
 });

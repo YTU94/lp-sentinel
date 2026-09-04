@@ -16,7 +16,7 @@ import { JsonStore } from './store.js';
 const validTokenId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const asyncRoute = (handler: RequestHandler): RequestHandler => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 
-export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities; monitorToken?: string }): Express {
+export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; testNotification?: () => Promise<void>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities; monitorToken?: string }): Express {
   const app = express();
   const lookup = options.lookup || lookupLpNft;
   const readPosition = options.readPosition || readBySource;
@@ -103,6 +103,12 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
     });
     options.onSettingsChanged?.();
     response.json(state.settings);
+  }));
+  app.post('/api/notifications/test', asyncRoute(async (request, response) => {
+    if (!runtime.notifications || runtime.notificationProvider !== 'dingtalk-openapi' || !options.testNotification) return void response.status(503).json({ error: 'Vercel 钉钉 OpenAPI 尚未配置' });
+    if (!validMonitorToken(request.get('authorization'), options.monitorToken)) return void response.status(401).json({ error: '云端监控访问口令无效，请在通知设置中填写' });
+    await options.testNotification();
+    response.json({ sent: true });
   }));
   app.post('/api/refresh', asyncRoute(async (request, response) => {
     if (runtime.mode === 'vercel') {

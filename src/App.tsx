@@ -116,6 +116,7 @@ function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () =
 function SettingsDialog({ settings, open, onClose, onSave, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
   const [form, setForm] = useState(settings);
   const [monitorToken, setMonitorToken] = useState('');
+  const [testStatus, setTestStatus] = useState('');
   useEffect(() => setForm(settings), [settings]);
   useEffect(() => { if (open && runtime.mode === 'vercel') setMonitorToken(window.sessionStorage.getItem(cloudMonitorTokenKey) || ''); }, [open, runtime.mode]);
   if (!open) return null;
@@ -125,6 +126,8 @@ function SettingsDialog({ settings, open, onClose, onSave, auth, runtime }: { se
     <label>轮询间隔（秒）<input type="number" min="5" value={form.pollIntervalMs / 1000} onChange={(e) => setForm({ ...form, pollIntervalMs: Number(e.target.value) * 1000 })} /></label>
     {cloudMode && <div className="info-banner">{cloudOpenApi ? 'Vercel 已接入钉钉 OpenAPI。页面打开期间会按轮询间隔刷新链上仓位并发送越界私聊。' : auth.error || 'Vercel 钉钉 OpenAPI 尚未配置。'}</div>}
     {cloudOpenApi && <label>云端监控访问口令<input type="password" autoComplete="off" value={monitorToken} onChange={(e) => setMonitorToken(e.target.value)} placeholder="LP_SENTINEL_MONITOR_TOKEN" /></label>}
+    {cloudOpenApi && <button className="secondary wide" disabled={monitorToken.trim().length < 32} onClick={async () => { setTestStatus('发送中…'); try { await api.testNotification(monitorToken.trim()); window.sessionStorage.setItem(cloudMonitorTokenKey, monitorToken.trim()); setTestStatus('测试消息已发送，请检查钉钉私聊。'); } catch (e) { setTestStatus((e as Error).message); } }}>发送测试消息</button>}
+    {testStatus && <div className="info-banner">{testStatus}</div>}
     <div className="toggle-row"><div><strong>钉钉普通私聊</strong><span>{cloudMode ? auth.authenticated ? auth.user : auth.error || 'OpenAPI 未配置' : auth.authenticated ? `DWS 已登录${auth.user ? ` · ${auth.user}` : ''}` : auth.error || 'DWS 未登录'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.notificationEnabled} onChange={(e) => setForm({ ...form, notificationEnabled: e.target.checked })} /></div>
     <div className="toggle-row"><div><strong>应用内 DING</strong><span>{cloudMode ? '云端当前只发送机器人普通私聊' : '追加通道，默认关闭'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.dingEnabled} onChange={(e) => setForm({ ...form, dingEnabled: e.target.checked })} /></div>
     <div className="toggle-row"><div><strong>电话 DING</strong><span>{cloudMode ? '云端保持关闭，不会产生通信费用' : '可能产生通信费用'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
