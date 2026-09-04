@@ -118,6 +118,16 @@ NODE_ENV=production npm start
 
 仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包本机的 `data/lp-sentinel.json`、`.env` 或 DWS 登录态。
 
+当前部署信息：
+
+| 项目 | 内容 |
+| --- | --- |
+| Vercel 项目 | [`ytu94s-projects/lp-sentinel`](https://vercel.com/ytu94s-projects/lp-sentinel) |
+| 当前环境 | Preview（受 Vercel Deployment Protection 保护，尚未发布到生产环境） |
+| Preview 地址 | [`lp-sentinel-271ka20fs-ytu94s-projects.vercel.app`](https://lp-sentinel-271ka20fs-ytu94s-projects.vercel.app) |
+| Deployment ID | `dpl_8mwYJt6ZxY2QgDbSDxJkvXGdh1ts` |
+| 对应 Git 提交 | `8742033` |
+
 云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；仓位记录只会短暂存在于 Function 的 `/tmp` 空间，不保证跨冷启动或实例持久化；后台 5 秒监控与全部 DWS/DING 通知强制关闭。需要持续预警和本地钉钉私聊时，请继续使用本地生产模式。
 
 ## 安全边界
