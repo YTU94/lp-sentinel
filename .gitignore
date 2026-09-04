@@ -1,0 +1,27 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Editors
+.idea/
+.vscode/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Common dependency and build outputs
+node_modules/
+dist/
+build/
+.venv/
+__pycache__/
+*.py[cod]
+
+# LP Sentinel runtime
+data/*.json
+!data/.gitkeep
+coverage/
+*.tsbuildinfo
