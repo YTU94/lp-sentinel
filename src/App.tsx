@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Bell, BellRing, ChevronRight, CircleDollarSign, ExternalLink, Gauge, LoaderCircle, Pause, Play, Plus, RefreshCw, Search, Settings as SettingsIcon, ShieldCheck, Trash2, WalletCards, X, Zap } from 'lucide-react';
+import { Activity, Bell, BellRing, ChevronRight, CircleDollarSign, ExternalLink, Gauge, LoaderCircle, Pause, Play, Plus, RefreshCw, ScrollText, Search, Settings as SettingsIcon, ShieldCheck, Trash2, WalletCards, X, Zap } from 'lucide-react';
+import changelogMarkdown from '../CHANGELOG.md?raw';
+import packageInfo from '../package.json';
 import { api } from './api';
 import { ActionStateMachine } from './action-state-machine';
 import { deriveActionStage } from './action-state-machine';
+import { parseChangelog } from './changelog';
 import { priceFreshness } from './price-freshness';
 import { formatTokenAmount } from './token-selection';
 import { IndexedDbPositionStore, storedPositionKey, toStoredPosition } from './indexeddb-position-store';
@@ -15,6 +18,8 @@ const compactAddress = (address: string) => `${address.slice(0, 6)}…${address.
 const localRuntime: RuntimeCapabilities = { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, notificationProvider: 'dws', positionStorage: 'indexeddb' };
 const positionStore = new IndexedDbPositionStore();
 const cloudMonitorTokenKey = 'lp-sentinel-monitor-token';
+const appVersion = packageInfo.version;
+const changelogReleases = parseChangelog(changelogMarkdown);
 
 function StatusPill({ position }: { position: Position }) {
   const fresh = priceFreshness(position.snapshot);
@@ -24,7 +29,7 @@ function StatusPill({ position }: { position: Position }) {
   return <span className={`status ${statusClass}`}>{text}</span>;
 }
 
-function PositionList({ positions, selected, onSelect, onAdd, runtime }: { positions: Position[]; selected?: string; onSelect: (id: string) => void; onAdd: () => void; runtime: RuntimeCapabilities }) {
+function PositionList({ positions, selected, onSelect, onAdd, onChangelog, runtime }: { positions: Position[]; selected?: string; onSelect: (id: string) => void; onAdd: () => void; onChangelog: () => void; runtime: RuntimeCapabilities }) {
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>LP Sentinel</strong><span>Liquidity intelligence</span></div></div>
     <button className="primary add-button" onClick={onAdd}><Plus size={17} /> 按 NFT 查询</button>
@@ -36,8 +41,21 @@ function PositionList({ positions, selected, onSelect, onAdd, runtime }: { posit
         <div className="position-copy"><strong>{position.name}</strong><span>{position.source.networkName} · #{position.source.tokenId}</span></div><ChevronRight size={16} />
       </button>)}
     </div>
-    <div className="sidebar-foot"><ShieldCheck size={16} /><span>{runtime.mode === 'vercel' ? '云端会话 · 浏览器本地存储' : '本地优先 · IndexedDB 存储'}<br />私钥永不离开钱包</span></div>
+    <div className="sidebar-foot"><ShieldCheck size={16} /><div><span>{runtime.mode === 'vercel' ? '云端会话 · 浏览器本地存储' : '本地优先 · IndexedDB 存储'}<br />私钥永不离开钱包</span><button className="version-link" onClick={onChangelog}><ScrollText size={12} /> v{appVersion} · 更新日志</button></div></div>
   </aside>;
+}
+
+function ChangelogDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return <div className="overlay" role="dialog" aria-modal="true" aria-label="更新日志"><div className="dialog changelog-dialog">
+    <button className="icon-button dialog-close" title="关闭更新日志" onClick={onClose}><X size={19} /></button>
+    <span className="eyebrow">RELEASE NOTES</span><h2>更新日志</h2>
+    <div className="version-hero"><div><small>当前版本</small><strong>LP Sentinel v{appVersion}</strong></div><ScrollText size={22} /></div>
+    <div className="release-list">{changelogReleases.map((release) => <article className="release-entry" key={release.version}>
+      <header><h3>v{release.version}{release.version === appVersion && <span>当前</span>}</h3><time>{release.date}</time></header>
+      {release.sections.map((section) => <section key={section.title}><h4>{section.title}</h4><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></section>)}
+    </article>)}</div>
+  </div></div>;
 }
 
 function PriceChannel({ position, onSave }: { position: Position; onSave: (lower: number, upper: number) => Promise<void> }) {
@@ -113,7 +131,7 @@ function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () =
   </div></div>;
 }
 
-function SettingsDialog({ settings, open, onClose, onSave, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
+function SettingsDialog({ settings, open, onClose, onSave, onChangelog, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; onChangelog: () => void; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
   const [form, setForm] = useState(settings);
   const [monitorToken, setMonitorToken] = useState('');
   const [testStatus, setTestStatus] = useState('');
@@ -133,6 +151,7 @@ function SettingsDialog({ settings, open, onClose, onSave, auth, runtime }: { se
     <div className="toggle-row"><div><strong>电话 DING</strong><span>{cloudMode ? '云端保持关闭，不会产生通信费用' : '可能产生通信费用'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
     {!cloudMode && (form.dingEnabled || form.dingCallEnabled) && <label>Robot Code<input value={form.dingRobotCode} onChange={(e) => setForm({ ...form, dingRobotCode: e.target.value })} placeholder="开放平台机器人 Robot Code" /></label>}
     <button className="primary wide" onClick={async () => { if (cloudOpenApi) window.sessionStorage.setItem(cloudMonitorTokenKey, monitorToken.trim()); await onSave(form); onClose(); }}>保存设置</button>
+    <button className="version-settings-link" onClick={onChangelog}><ScrollText size={14} /> LP Sentinel v{appVersion} · 查看更新日志</button>
   </div></div>;
 }
 
@@ -155,7 +174,7 @@ function WalletDialog({ open, onClose }: { open: boolean; onClose: () => void })
 
 export default function App() {
   const [state, setState] = useState<AppState | null>(null); const [selectedId, setSelectedId] = useState<string>(); const [error, setError] = useState(''); const [refreshing, setRefreshing] = useState(false);
-  const [lookupOpen, setLookupOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [walletOpen, setWalletOpen] = useState(false);
+  const [lookupOpen, setLookupOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [walletOpen, setWalletOpen] = useState(false); const [changelogOpen, setChangelogOpen] = useState(false);
   const hydrated = useRef(false);
   const cloudRefreshInFlight = useRef(false);
   const load = useCallback(async () => {
@@ -202,9 +221,9 @@ export default function App() {
   const removePosition = async (position: Position) => { try { await api.remove(position.id); await positionStore.remove(storedPositionKey(position.source.sourceId, position.source.tokenId)); await load(); } catch (e) { setError((e as Error).message); } };
   if (!state) return <div className="boot"><div className="brand-mark"><Activity /></div><LoaderCircle className="spin" /><span>{error || '正在读取本地状态…'}</span></div>;
   return <div className={`app-shell ${state.runtime.mode === 'vercel' ? 'cloud-mode' : ''}`}>
-    <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} runtime={state.runtime} />
+    <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} onChangelog={() => setChangelogOpen(true)} runtime={state.runtime} />
     <main>
-      <header><div><span className="mobile-brand">LP SENTINEL</span><h1>{selected ? selected.name : '监控控制台'}</h1>{selected && <div className="header-meta"><StatusPill position={selected} /><span>{selected.source.networkName}</span><span>{selected.source.protocol}</span><span>#{selected.source.tokenId}</span></div>}</div><div className="header-actions">
+      <header><div><span className="mobile-brand">LP SENTINEL · v{appVersion}</span><h1>{selected ? selected.name : '监控控制台'}</h1>{selected && <div className="header-meta"><StatusPill position={selected} /><span>{selected.source.networkName}</span><span>{selected.source.protocol}</span><span>#{selected.source.tokenId}</span></div>}</div><div className="header-actions">
         <button className="icon-button" title="钱包" onClick={() => setWalletOpen(true)}><WalletCards size={19} /></button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><SettingsIcon size={19} /></button><button className="secondary refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await mutate(async () => api.refresh(state.runtime.mode === 'vercel' ? await positionStore.getAll() : undefined, state.runtime.mode === 'vercel' ? window.sessionStorage.getItem(cloudMonitorTokenKey) || undefined : undefined)); setRefreshing(false); }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 刷新</button>
       </div></header>
       {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：基础仓位保存在当前浏览器 IndexedDB；页面打开期间每 {Math.max(5, state.settings.pollIntervalMs / 1000)} 秒刷新链上快照{state.runtime.notifications ? '，越界时通过钉钉 OpenAPI 私聊预警' : '；钉钉 OpenAPI 尚未配置'}。</span></div>}
@@ -216,7 +235,8 @@ export default function App() {
       </div>}
     </main>
     <NftDialog open={lookupOpen} onClose={() => setLookupOpen(false)} onImported={async (position) => { await positionStore.put(toStoredPosition(position)); await load(); }} />
-    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} />
+    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} onChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }} />
     <WalletDialog open={walletOpen} onClose={() => setWalletOpen(false)} />
+    <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
   </div>;
 }
