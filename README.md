@@ -135,9 +135,9 @@ NODE_ENV=production npm start
 | --- | --- |
 | Vercel 项目 | [`ytu94s-projects/lp-sentinel`](https://vercel.com/ytu94s-projects/lp-sentinel) |
 | 当前环境 | Preview（受 Vercel Deployment Protection 保护，尚未发布到生产环境） |
-| Preview 地址 | [`lp-sentinel-3ob252npn-ytu94s-projects.vercel.app`](https://lp-sentinel-3ob252npn-ytu94s-projects.vercel.app) |
-| Deployment ID | `dpl_2QEmDUYswDF2win6aXT8grGkpfy7` |
-| 对应 Git 提交 | `0b0fae5` |
+| Preview 地址 | [`lp-sentinel-hzj4159rj-ytu94s-projects.vercel.app`](https://lp-sentinel-hzj4159rj-ytu94s-projects.vercel.app) |
+| Deployment ID | `dpl_4FJSUJwfy2h3vC1FefEUQ3McfSaF` |
+| 对应 Git 提交 | `10d0fbc` |
 
 用户添加的仓位基础配置保存在浏览器 IndexedDB，包含来源、NFT ID、启停状态、预警线与布防状态；价格、估值、手续费、区块和历史采样不会作为基础数据持久化，启动时按来源重新读取链上数据。首次升级时，页面会先把旧 JSON 中的仓位迁移到 IndexedDB，确认成功后才清空 JSON 的 `positions` 数组。
 
