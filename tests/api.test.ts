@@ -54,39 +54,62 @@ describe('LP Sentinel API', () => {
     expect(onSettingsChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('reports Vercel OpenAPI notifications without claiming background monitoring', async () => {
+  it('reports that Vercel cannot inherit the local DWS login', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
     });
     const response = await request(app).get('/api/state').expect(200);
     expect(response.body.runtime).toEqual({
       mode: 'vercel',
       persistent: false,
       backgroundMonitoring: false,
-      notifications: true,
-      notificationProvider: 'dingtalk-openapi',
+      notifications: false,
+      notificationProvider: 'none',
       positionStorage: 'indexeddb',
     });
   });
 
-  it('locks Vercel notification settings to server-side OpenAPI configuration', async () => {
+  it('locks notification settings when the runtime has no DWS CLI', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
     });
     const response = await request(app).patch('/api/settings').send({
       notificationEnabled: true,
       dingEnabled: true,
       dingCallEnabled: true,
-      dingRobotCode: 'must-not-be-stored',
     }).expect(200);
     expect(response.body).toMatchObject({
-      notificationEnabled: true,
+      notificationEnabled: false,
       dingEnabled: false,
       dingCallEnabled: false,
-      dingRobotCode: '',
     });
+    expect(response.body).not.toHaveProperty('dingRobotCode');
+  });
+
+  it('refreshes local DWS auth status without returning credentials', async () => {
+    const getAuthStatus = vi.fn().mockResolvedValue({ authenticated: true, user: 'Alice', checkedAt: '2026-09-04T00:00:00.000Z' });
+    const app = createApp({ store, getAuthStatus });
+    const response = await request(app).get('/api/notifications/auth').expect(200);
+    expect(response.body).toEqual({ authenticated: true, user: 'Alice', checkedAt: '2026-09-04T00:00:00.000Z' });
+    expect(store.get().notification).toEqual(response.body);
+  });
+
+  it('sends a local DWS test notification after checking auth', async () => {
+    const getAuthStatus = vi.fn().mockResolvedValue({ authenticated: true, user: 'Alice', checkedAt: '2026-09-04T00:00:00.000Z' });
+    const testNotification = vi.fn().mockResolvedValue(undefined);
+    const app = createApp({ store, getAuthStatus, testNotification });
+    await request(app).post('/api/notifications/test').expect(200, { sent: true });
+    expect(testNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send a test notification when DWS is not authenticated', async () => {
+    const getAuthStatus = vi.fn().mockResolvedValue({ authenticated: false, checkedAt: '2026-09-04T00:00:00.000Z', error: 'DWS 未登录' });
+    const testNotification = vi.fn();
+    const app = createApp({ store, getAuthStatus, testNotification });
+    await request(app).post('/api/notifications/test').expect(409, { error: 'DWS 未登录' });
+    expect(testNotification).not.toHaveBeenCalled();
   });
 
   it('hydrates runtime positions from IndexedDB base records', async () => {
@@ -142,38 +165,27 @@ describe('LP Sentinel API', () => {
     expect(response.body.positions[0].id).toBe('browser-position');
   });
 
-  it('requires the private monitor token before a Vercel refresh can send alerts', async () => {
+  it('allows Vercel refresh without a notification bearer token when DWS is unavailable', async () => {
     const refresh = vi.fn(async () => store.get());
     const app = createApp({
       store,
       refresh,
-      monitorToken: '0123456789abcdef0123456789abcdef',
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
     });
 
-    await request(app).post('/api/refresh').send({ positions: [] }).expect(401);
-    expect(refresh).not.toHaveBeenCalled();
-
-    await request(app).post('/api/refresh')
-      .set('Authorization', 'Bearer 0123456789abcdef0123456789abcdef')
-      .send({ positions: [] })
-      .expect(200);
+    await request(app).post('/api/refresh').send({ positions: [] }).expect(200);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it('protects the Vercel notification test endpoint with the same monitor token', async () => {
+  it('does not expose the DWS notification test endpoint on Vercel', async () => {
     const testNotification = vi.fn().mockResolvedValue(undefined);
     const app = createApp({
       store,
       testNotification,
-      monitorToken: '0123456789abcdef0123456789abcdef',
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
     });
 
-    await request(app).post('/api/notifications/test').expect(401);
-    await request(app).post('/api/notifications/test')
-      .set('Authorization', 'Bearer 0123456789abcdef0123456789abcdef')
-      .expect(200, { sent: true });
-    expect(testNotification).toHaveBeenCalledTimes(1);
+    await request(app).post('/api/notifications/test').expect(503);
+    expect(testNotification).not.toHaveBeenCalled();
   });
 });

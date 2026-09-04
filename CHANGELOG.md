@@ -2,6 +2,20 @@
 
 本文件记录 LP Sentinel 的用户可见变更。版本号遵循语义化版本。
 
+## [0.3.0] - 2026-09-04
+
+### 变更
+
+- 钉钉通知统一使用本地 DWS CLI OAuth 登录态，不再读取 AppKey、AppSecret 或云端监控口令。
+- 设置页支持刷新 DWS 登录状态并发送普通私聊测试消息。
+- 应用内 DING 与电话 DING 改用当前 DWS 用户身份发送，不再要求 Robot Code。
+- Vercel 版本明确关闭钉钉通知；链上查询、IndexedDB 仓位和页面内刷新不受影响。
+
+### 安全
+
+- LP Sentinel 只执行 DWS 命令，不读取、保存或返回 OAuth Token。
+- 旧版保存的 Robot Code 在状态迁移时自动移除。
+
 ## [0.2.0] - 2026-09-04
 
 ### 新增

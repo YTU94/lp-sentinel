@@ -111,7 +111,7 @@ npm run test:watch
 - `server/domain/smart-alerts.ts` 根据 LP 区间宽度和 tick 结构推荐预警阈值与设置。
 - `server/domain/alert-engine.ts` 判断下边界/上边界触达，并维护每一侧一次告警、回到安全区后重新布防的行为。
 - 具有已注册 `source.type` 的 NFT 仓位始终通过对应链上适配器刷新；仅历史模拟仓位使用 Binance 价格。
-- 全局预警设置包括轮询间隔、通知开关、DING 机器人配置等，走 `PATCH /api/settings`；单仓位上下阈值走 `PATCH /api/positions/:id/alerts`。
+- 全局预警设置包括轮询间隔、通知开关和 DWS 个人 DING 开关，走 `PATCH /api/settings`；单仓位上下阈值走 `PATCH /api/positions/:id/alerts`。
 - 预警本身不会直接移除或重建 LP；它只触发通知和 Action 状态变化。
 
 ### 3.7 Action 状态机
@@ -129,8 +129,10 @@ npm run test:watch
 
 - `server/services/dws-auth.ts` 读取 DWS 身份。
 - `server/services/dws-notifier.ts` 构造并发送通知命令。
-- 常规私信通知始终可用；应用内 DING 由 `dingEnabled` 控制，电话 DING 由 `dingCallEnabled` 控制，两者共享 `dingRobotCode` 且默认关闭。
-- 当前不支持短信通知。电话 DING 已作为可选高优先级通道接入，但默认关闭，依赖有效的 `dingRobotCode`、DWS 登录态及对应开放平台权限；不得把“可发送电话 DING”描述成后台自动执行 LP 交易。
+- 本地通知统一使用 `dws auth login` 建立的 OAuth 登录态；设置页只刷新状态和发送测试私聊，不读取或保存 Token。
+- 常规私信通知始终可用；应用内 DING 由 `dingEnabled` 控制，电话 DING 由 `dingCallEnabled` 控制，两者通过 `ding message send-personal` 使用当前用户身份且默认关闭，不再依赖 Robot Code。
+- 当前不支持短信通知。电话 DING 默认关闭，依赖有效的 DWS 登录态、当前身份的 `openDingTalkId` 及对应权限；不得把“可发送电话 DING”描述成后台自动执行 LP 交易。
+- Vercel 无法继承本机 DWS CLI 登录态，云端通知能力必须明确关闭，不得回退到 AppKey/AppSecret 或把登录凭据上传云端。
 
 ### 3.9 本地状态与静态应用
 
@@ -240,6 +242,8 @@ monitor 取得当前价格
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/state` | 读取应用状态 |
+| GET | `/api/notifications/auth` | 刷新本地 DWS CLI OAuth 登录状态 |
+| POST | `/api/notifications/test` | 向当前 DWS 登录用户发送测试私聊 |
 | GET | `/api/tokens/search` | 搜索代币 |
 | GET | `/api/wallet/:address/pancake-v3` | 读取 BNB 钱包 V3 仓位 |
 | GET | `/api/lp-nft/:tokenId` | 并行识别并返回所有已支持来源的 NFT 仓位 |
@@ -260,7 +264,7 @@ monitor 取得当前价格
 - `ROBINHOOD_RPC_URL`：Robinhood Chain RPC。
 - `BSC_RPC_URL`：BNB Chain RPC。
 - `BSCSCAN_API_KEY`：可选的 BscScan token ID 发现。
-- DWS 认证/通知相关环境变量：由 `dws-auth.ts` 和 `dws-notifier.ts` 实际读取为准。
+- DWS 认证由 CLI 自行管理，不通过 LP Sentinel 环境变量传入 Token、AppKey 或 AppSecret。
 
 安全要求：
 
@@ -297,7 +301,7 @@ npm run build
 ## 10. 当前明确的非目标与限制
 
 - 没有后台自动移除、自动添加、自动 Zap、自动复投或自动签名。
-- 没有短信通知；电话 DING 仅在用户显式启用且权限、Robot Code 完整时可用。
+- 没有短信通知；电话 DING 仅在用户显式启用且当前 DWS 登录身份、`openDingTalkId` 与权限完整时可用。
 - 没有云端数据库、多用户权限、云端同步或跨设备账户；IndexedDB 数据仅属于当前浏览器来源与配置。
 - 没有完整的历史价格曲线、无常损失历史报表或农场奖励聚合。
 - PancakeSwap 目前覆盖直接持有的 V3 Position NFT；复杂托管、质押、Vault 或第三方管理仓位需单独适配。

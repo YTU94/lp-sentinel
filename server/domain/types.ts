@@ -102,7 +102,6 @@ export interface Settings {
   notificationEnabled: boolean;
   dingEnabled: boolean;
   dingCallEnabled: boolean;
-  dingRobotCode: string;
 }
 
 export interface AppState {
@@ -118,7 +117,7 @@ export interface RuntimeCapabilities {
   persistent: boolean;
   backgroundMonitoring: boolean;
   notifications: boolean;
-  notificationProvider: 'dws' | 'dingtalk-openapi' | 'none';
+  notificationProvider: 'dws' | 'none';
   positionStorage: 'indexeddb';
 }
 

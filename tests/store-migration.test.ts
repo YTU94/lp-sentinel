@@ -18,8 +18,9 @@ describe('JsonStore realtime polling migration', () => {
       const store = new JsonStore(file);
       const state = await store.load();
       expect(state.settings.pollIntervalMs).toBe(5_000);
-      expect((state as { schemaVersion?: number }).schemaVersion).toBe(2);
-      expect(JSON.parse(await readFile(file, 'utf8')).schemaVersion).toBe(2);
+      expect((state as { schemaVersion?: number }).schemaVersion).toBe(3);
+      expect(state.settings).not.toHaveProperty('dingRobotCode');
+      expect(JSON.parse(await readFile(file, 'utf8')).schemaVersion).toBe(3);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

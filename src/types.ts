@@ -17,7 +17,7 @@ export interface Position extends Omit<LiveLpPosition, 'currentTick' | 'currentP
   history: SnapshotPoint[]; feeApr1h: { annualizedPercent: number; feesEarnedQuote: number; windowSeconds: number; sampleCount: number; fullWindow: boolean } | null;
   createdAt: string; lastError?: string;
 }
-export interface Settings { pollIntervalMs: number; notificationEnabled: boolean; dingEnabled: boolean; dingCallEnabled: boolean; dingRobotCode: string }
-export interface RuntimeCapabilities { mode: 'local' | 'vercel'; persistent: boolean; backgroundMonitoring: boolean; notifications: boolean; notificationProvider: 'dws' | 'dingtalk-openapi' | 'none'; positionStorage: 'indexeddb' }
-export interface AppState { schemaVersion: number; positions: Position[]; settings: Settings; notification: { authenticated: boolean; user?: string; error?: string }; runtime: RuntimeCapabilities; updatedAt: string; serverTime: string }
+export interface Settings { pollIntervalMs: number; notificationEnabled: boolean; dingEnabled: boolean; dingCallEnabled: boolean }
+export interface RuntimeCapabilities { mode: 'local' | 'vercel'; persistent: boolean; backgroundMonitoring: boolean; notifications: boolean; notificationProvider: 'dws' | 'none'; positionStorage: 'indexeddb' }
+export interface AppState { schemaVersion: number; positions: Position[]; settings: Settings; notification: { authenticated: boolean; user?: string; checkedAt?: string; error?: string }; runtime: RuntimeCapabilities; updatedAt: string; serverTime: string }
 export interface LpLookup { matches: LiveLpPosition[]; probes: Array<{ sourceId: LpSourceId; networkName: string; protocol: string; status: 'found' | 'not_found' | 'unavailable'; message: string }> }

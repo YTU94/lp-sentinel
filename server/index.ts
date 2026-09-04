@@ -1,5 +1,4 @@
 import express, { type Express, type RequestHandler } from 'express';
-import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { importLivePosition } from './domain/live-lp-import.js';
@@ -10,16 +9,18 @@ import { lookupLpNft, readBySource, type LpLookupResult } from './services/lp-nf
 import { readRobinhoodPosition } from './services/robinhood-v3.js';
 import { readWalletPancakePositions } from './services/pancake-v3.js';
 import { searchBinanceSymbols } from './services/binance-symbol-search.js';
-import { getDwsAuthStatus } from './services/dws-auth.js';
+import { getDwsAuthStatus, type DwsAuthStatus } from './services/dws-auth.js';
+import { sendDwsTestNotification } from './services/dws-notifier.js';
 import { JsonStore } from './store.js';
 
 const validTokenId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const asyncRoute = (handler: RequestHandler): RequestHandler => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 
-export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; testNotification?: () => Promise<void>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities; monitorToken?: string }): Express {
+export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; getAuthStatus?: () => Promise<DwsAuthStatus>; testNotification?: () => Promise<void>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities }): Express {
   const app = express();
   const lookup = options.lookup || lookupLpNft;
   const readPosition = options.readPosition || readBySource;
+  const getAuthStatus = options.getAuthStatus || getDwsAuthStatus;
   const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, notificationProvider: 'dws', positionStorage: 'indexeddb' };
   const hydratePositions = async (records: StoredLpPosition[]) => {
     const unique = [...new Map(records.map((record) => [`${record.sourceId}:${record.tokenId}`, record])).values()];
@@ -94,25 +95,31 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
     response.status(removed ? 204 : 404).end();
   }));
   app.patch('/api/settings', asyncRoute(async (request, response) => {
-    const allowed = ['pollIntervalMs', 'notificationEnabled', 'dingEnabled', 'dingCallEnabled', 'dingRobotCode'] as const;
+    const allowed = ['pollIntervalMs', 'notificationEnabled', 'dingEnabled', 'dingCallEnabled'] as const;
     const state = await options.store.update((draft) => {
       for (const key of allowed) if (key in request.body) Object.assign(draft.settings, { [key]: request.body[key] });
       if (draft.settings.pollIntervalMs < 5_000) draft.settings.pollIntervalMs = 5_000;
-      if (runtime.notificationProvider === 'dingtalk-openapi') Object.assign(draft.settings, { notificationEnabled: runtime.notifications, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
-      else if (!runtime.notifications) Object.assign(draft.settings, { notificationEnabled: false, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
+      if (!runtime.notifications) Object.assign(draft.settings, { notificationEnabled: false, dingEnabled: false, dingCallEnabled: false });
     });
     options.onSettingsChanged?.();
     response.json(state.settings);
   }));
-  app.post('/api/notifications/test', asyncRoute(async (request, response) => {
-    if (!runtime.notifications || runtime.notificationProvider !== 'dingtalk-openapi' || !options.testNotification) return void response.status(503).json({ error: 'Vercel 钉钉 OpenAPI 尚未配置' });
-    if (!validMonitorToken(request.get('authorization'), options.monitorToken)) return void response.status(401).json({ error: '云端监控访问口令无效，请在通知设置中填写' });
-    await options.testNotification();
+  app.get('/api/notifications/auth', asyncRoute(async (_request, response) => {
+    if (!runtime.notifications || runtime.notificationProvider !== 'dws') return void response.status(503).json({ error: 'DWS CLI 认证仅支持本地运行' });
+    const status = await getAuthStatus();
+    await options.store.update((draft) => { draft.notification = status; });
+    response.json(status);
+  }));
+  app.post('/api/notifications/test', asyncRoute(async (_request, response) => {
+    if (!runtime.notifications || runtime.notificationProvider !== 'dws') return void response.status(503).json({ error: 'DWS CLI 通知仅支持本地运行' });
+    const status = await getAuthStatus();
+    await options.store.update((draft) => { draft.notification = status; });
+    if (!status.authenticated) return void response.status(409).json({ error: status.error || 'DWS CLI 未登录，请执行 dws auth login' });
+    await (options.testNotification || sendDwsTestNotification)();
     response.json({ sent: true });
   }));
   app.post('/api/refresh', asyncRoute(async (request, response) => {
     if (runtime.mode === 'vercel') {
-      if (runtime.notifications && !validMonitorToken(request.get('authorization'), options.monitorToken)) return void response.status(401).json({ error: '云端监控访问口令无效，请在通知设置中填写' });
       const records = (request.body as { positions?: unknown }).positions;
       if (!Array.isArray(records) || records.length > 100 || !records.every(isStoredLpPosition)) return void response.status(400).json({ error: 'Vercel 刷新需要有效的 IndexedDB 仓位数据' });
       await hydratePositions(records as StoredLpPosition[]);
@@ -145,13 +152,6 @@ function isStoredLpPosition(value: unknown): value is StoredLpPosition {
     && Number.isFinite(record.alertLower) && Number.isFinite(record.alertUpper)
     && typeof record.alertState?.armed === 'boolean' && (boundary === null || boundary === 'lower' || boundary === 'upper')
     && typeof record.createdAt === 'string' && Number.isFinite(Date.parse(record.createdAt));
-}
-
-function validMonitorToken(authorization: string | undefined, expected: string | undefined): boolean {
-  if (!expected || expected.length < 32 || !authorization?.startsWith('Bearer ')) return false;
-  const provided = Buffer.from(authorization.slice(7));
-  const target = Buffer.from(expected);
-  return provided.length === target.length && timingSafeEqual(provided, target);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();

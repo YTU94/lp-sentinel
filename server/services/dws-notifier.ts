@@ -2,9 +2,9 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { AlertBoundary, Position, Settings } from '../domain/types.js';
-import { buildAlertContent, getDingTalkConfig, sendDingTalkAlert } from './dingtalk-notifier.js';
+import type { DwsRunner } from './dws-auth.js';
 
-const run = promisify(execFile);
+const run = promisify(execFile) as unknown as DwsRunner;
 
 interface DwsIdentity { userId: string; openDingTalkId: string }
 
@@ -21,30 +21,44 @@ function findString(value: unknown, keys: string[]): string {
   return '';
 }
 
-async function getSelfIdentity(): Promise<DwsIdentity> {
-  const { stdout } = await run('dws', ['contact', 'user', 'get-self', '--format', 'json'], { timeout: 10_000, maxBuffer: 256_000 });
-  const payload = JSON.parse(stdout) as unknown;
+async function getSelfIdentity(runner: DwsRunner): Promise<DwsIdentity> {
+  const { stdout } = await runner('dws', ['contact', 'user', 'get-self', '--format', 'json'], { timeout: 10_000, maxBuffer: 256_000 });
+  const payload = JSON.parse(String(stdout)) as unknown;
   const userId = findString(payload, ['userId', 'userid', 'user_id']);
   const openDingTalkId = findString(payload, ['openDingTalkId', 'openDingtalkId', 'open_dingtalk_id']);
   if (!userId) throw new Error('DWS 当前身份缺少 userId');
   return { userId, openDingTalkId };
 }
 
+export function buildAlertContent(position: Position, boundary: AlertBoundary): string {
+  const line = boundary === 'lower' ? '下限' : '上限';
+  const network = position.source.networkName ? ` · ${position.source.networkName}` : '';
+  return `[LP Sentinel] ${position.name} #${position.source.tokenId}${network} 触及${line}预警：${position.currentPrice?.toPrecision(7)}`;
+}
+
 export function buildDwsCommands(position: Position, boundary: AlertBoundary, settings: Settings, identity: DwsIdentity, idempotencyKey = randomUUID()): string[][] {
   if (!settings.notificationEnabled) return [];
+  if ((settings.dingEnabled || settings.dingCallEnabled) && !identity.openDingTalkId) throw new Error('DWS 当前身份缺少 openDingTalkId，无法发送个人 DING');
   const content = buildAlertContent(position, boundary);
-  const commands = [['chat', 'message', 'send', '--user', identity.userId, '--content', content, '--idempotency-key', idempotencyKey, '--format', 'json', '--yes']];
-  if (settings.dingEnabled && settings.dingRobotCode) commands.push(['ding', 'message', 'send', '--robot-code', settings.dingRobotCode, '--users', identity.userId, '--content', content, '--type', 'app', '--format', 'json', '--yes']);
-  if (settings.dingCallEnabled && settings.dingRobotCode) commands.push(['ding', 'message', 'send', '--robot-code', settings.dingRobotCode, '--users', identity.userId, '--content', content, '--type', 'call', '--format', 'json', '--yes']);
+  const commands = [['chat', 'message', 'send', '--user', identity.userId, content, '--idempotency-key', idempotencyKey, '--format', 'json']];
+  if (settings.dingEnabled && identity.openDingTalkId) commands.push(['ding', 'message', 'send-personal', '--users', identity.openDingTalkId, '--content', content, '--type', 'app', '--uuid', `${idempotencyKey}-app`, '--format', 'json']);
+  if (settings.dingCallEnabled && identity.openDingTalkId) commands.push(['ding', 'message', 'send-personal', '--users', identity.openDingTalkId, '--content', content, '--type', 'call', '--uuid', `${idempotencyKey}-call`, '--format', 'json']);
   return commands;
 }
 
-export async function notifyPosition(position: Position, boundary: AlertBoundary, settings: Settings, options: { env?: Record<string, string | undefined>; fetcher?: typeof fetch } = {}) {
+async function runCommands(commands: string[][], runner: DwsRunner): Promise<void> {
+  for (const args of commands) await runner('dws', args, { timeout: 15_000, maxBuffer: 256_000 });
+}
+
+export async function sendDwsTestNotification(runner: DwsRunner = run): Promise<void> {
+  const identity = await getSelfIdentity(runner);
+  const content = `[LP Sentinel] DWS CLI 通知测试成功 · ${new Date().toISOString()}`;
+  await runCommands([['chat', 'message', 'send', '--user', identity.userId, content, '--idempotency-key', randomUUID(), '--format', 'json']], runner);
+}
+
+export async function notifyPosition(position: Position, boundary: AlertBoundary, settings: Settings, options: { runner?: DwsRunner } = {}) {
   if (!settings.notificationEnabled) return;
-  const env = options.env || process.env;
-  const cloud = getDingTalkConfig(env);
-  if (cloud.config) return sendDingTalkAlert(position, boundary, cloud.config, options.fetcher);
-  if (env.VERCEL) throw new Error(`Vercel 钉钉通知未配置：缺少 ${cloud.missing.join(', ')}`);
-  const identity = await getSelfIdentity();
-  for (const args of buildDwsCommands(position, boundary, settings, identity)) await run('dws', args, { timeout: 15_000, maxBuffer: 256_000 });
+  const runner = options.runner || run;
+  const identity = await getSelfIdentity(runner);
+  await runCommands(buildDwsCommands(position, boundary, settings, identity), runner);
 }

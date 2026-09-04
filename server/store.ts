@@ -3,14 +3,13 @@ import { dirname } from 'node:path';
 import type { AppState } from './domain/types.js';
 
 export const defaultState = (): AppState => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   positions: [],
   settings: {
     pollIntervalMs: 5_000,
     notificationEnabled: true,
     dingEnabled: false,
     dingCallEnabled: false,
-    dingRobotCode: '',
   },
   notification: { authenticated: false },
   updatedAt: new Date().toISOString(),
@@ -29,12 +28,18 @@ export class JsonStore {
     try {
       const defaults = defaultState();
       const stored = JSON.parse(await readFile(this.file, 'utf8')) as Partial<AppState>;
-      const legacy = (stored.schemaVersion || 0) < 2;
-      const settings = { ...defaults.settings, ...stored.settings };
-      if (legacy && settings.pollIntervalMs === 300_000) settings.pollIntervalMs = 5_000;
-      this.state = { ...defaults, ...stored, schemaVersion: 2, settings };
+      const schemaVersion = stored.schemaVersion || 0;
+      const rawSettings: Partial<AppState['settings']> = stored.settings || {};
+      const settings = {
+        pollIntervalMs: rawSettings.pollIntervalMs ?? defaults.settings.pollIntervalMs,
+        notificationEnabled: rawSettings.notificationEnabled ?? defaults.settings.notificationEnabled,
+        dingEnabled: rawSettings.dingEnabled ?? defaults.settings.dingEnabled,
+        dingCallEnabled: rawSettings.dingCallEnabled ?? defaults.settings.dingCallEnabled,
+      };
+      if (schemaVersion < 2 && settings.pollIntervalMs === 300_000) settings.pollIntervalMs = 5_000;
+      this.state = { ...defaults, ...stored, schemaVersion: 3, settings };
       if (this.options.positionStorage === 'indexeddb') this.persistPositions = Boolean(stored.positions?.length);
-      if (legacy) await this.persist(this.state);
+      if (schemaVersion < 3) await this.persist(this.state);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await this.persist(this.state);

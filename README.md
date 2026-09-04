@@ -2,7 +2,7 @@
 
 本地运行的集中流动性 LP 监控、模拟与价格预警工具。
 
-当前版本：**v0.2.0**。应用桌面侧栏、移动端标题和设置页都会显示版本号，点击“更新日志”可直接查看内置版本记录。完整记录见 [`CHANGELOG.md`](./CHANGELOG.md)。
+当前版本：**v0.3.0**。应用桌面侧栏、移动端标题和设置页都会显示版本号，点击“更新日志”可直接查看内置版本记录。完整记录见 [`CHANGELOG.md`](./CHANGELOG.md)。
 
 发布新版本时，以 `package.json` 的 `version` 为应用版本单一来源，并在 `CHANGELOG.md` 顶部增加对应版本；前端构建会自动带入两者，无需另行维护界面常量。
 
@@ -11,7 +11,7 @@
 - 通过 Position NFT 查询导入并监控多个 LP；导入时自动带入链上价格、区间、资产和智能预警线。
 - 已导入仓位可暂停/恢复监控、删除本地记录，并可在价格航道中直接拖动上下预警线；链上仓位本身不提供通用编辑入口。
 - 读取链上池价格，并按集中流动性曲线估算当前两种代币构成。
-- 触及预警线时，本地版通过 DWS 给当前登录用户发送钉钉私聊；Vercel 版通过服务端钉钉 OpenAPI 发送机器人私聊。
+- 触及预警线时，本地版通过 DWS CLI OAuth 登录态给当前用户发送钉钉私聊；应用不读取或保存 Token。
 - 可选追加应用内 DING 或高优先级电话 DING；两者默认关闭，电话 DING 可能产生通信费用。
 - 越界只报警一次，价格回到安全区后自动重新布防。
 - 用户添加的基础 LP 数据保存在当前浏览器的 IndexedDB；服务端设置与通知状态保存在本机 `data/lp-sentinel.json`。
@@ -38,7 +38,7 @@ npm run dev
 dws auth status --format json
 ```
 
-如果尚未登录，运行 `dws auth login`。追加应用内/电话 DING 还需要在设置中填写开放平台机器人的 Robot Code。
+如果尚未登录，运行 `dws auth login`。设置页可刷新登录状态并发送测试消息；应用内/电话 DING 也使用当前 DWS 用户身份，不再需要 Robot Code。当前 Vercel 运行时无法继承本机 DWS 登录态，因此只在本地运行时提供钉钉通知。
 
 ## 验证
 
@@ -104,7 +104,7 @@ NODE_ENV=production npm start
 - 价格持续位于同一侧：不重复发送。
 - 价格回到两条预警线之间：自动重新布防。
 
-普通私聊默认开启。应用内 DING 和电话 DING 是两个独立追加通道，不会替代普通消息；电话通道仅在明确启用后生效。
+普通私聊默认开启。应用内 DING 和电话 DING 是两个独立追加通道，统一使用当前 DWS 登录身份，不会替代普通消息；电话通道仅在明确启用后生效。
 
 ## 环境变量
 
@@ -115,23 +115,14 @@ NODE_ENV=production npm start
 | `ROBINHOOD_RPC_URL` | Robinhood Chain RPC；默认使用限流公共节点 |
 | `BSC_RPC_URL` | BNB Chain RPC |
 | `BSCSCAN_API_KEY` | 自动枚举钱包 Position NFT，可选 |
-| `DINGTALK_APP_KEY` | 钉钉企业内部应用 AppKey，仅供服务端读取 |
-| `DINGTALK_APP_SECRET` | 钉钉企业内部应用 AppSecret，必须作为加密环境变量保存 |
-| `DINGTALK_ROBOT_CODE` | 应用机器人的 Robot Code |
-| `DINGTALK_USER_IDS` | 接收预警的企业用户 `userId`，多个值用逗号分隔，最多 20 个 |
-| `LP_SENTINEL_MONITOR_TOKEN` | Vercel 云端刷新访问口令，至少 32 个随机字符，阻止公开站点被滥用发送预警 |
 | `LP_SENTINEL_PORT` | 生产服务端口，默认 `4317` |
 | `LP_SENTINEL_DATA` | 服务端设置与通知状态 JSON 文件位置，默认 `data/lp-sentinel.json`；不再持久化基础 LP 仓位 |
 
 ## Vercel 部署
 
-仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包本机的 `data/lp-sentinel.json`、`.env` 或 DWS 登录态。云端发送预警前，需要在 Vercel 项目的 Production、Preview 环境中配置上表四个 `DINGTALK_*` 变量和 `LP_SENTINEL_MONITOR_TOKEN`；这些变量只能由服务端 Function 读取，禁止添加 `VITE_` 前缀。
+仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包 DWS CLI，也无法继承本机 OAuth 登录态，因此云端版本不发送钉钉通知，不需要配置 AppKey、AppSecret、Robot Code 或监控口令。链上 NFT 查询、钱包连接、浏览器 IndexedDB 仓位和页面打开期间的链上刷新仍然可用。
 
-钉钉企业内部应用需要启用机器人、申请“机器人向员工发消息”等对应权限并完成发布。云端先使用 AppKey/AppSecret 获取短期 `accessToken`，再调用机器人单聊接口；密钥、令牌与接收人 ID 都不会写入 IndexedDB、响应正文或前端构建产物。五项配置缺少任意一项时，界面会明确显示“OpenAPI 尚未配置”，不会回退到不可用的本机 DWS。
-
-`LP_SENTINEL_MONITOR_TOKEN` 用于保护公开部署的刷新接口，避免第三方构造仓位请求向你的钉钉账号发送垃圾预警。把同一口令填入页面“设置 → 云端监控访问口令”；浏览器只把它保存在当前标签会话的 `sessionStorage`，关闭会话后需重新输入。不要使用 AppSecret 或钱包相关信息作为此口令。
-
-配置并重新部署后，可在设置页点击“发送测试消息”验证完整链路。该接口同样要求监控口令，测试成功后钉钉会收到带有 UTC 时间的 LP Sentinel 通道测试私聊。
+需要钉钉预警时，请在运行 LP Sentinel 的同一系统用户下安装 DWS CLI，执行 `dws auth login`，再从设置页刷新状态并发送测试消息。DWS 自行管理 OAuth Token 的安全存储与刷新；LP Sentinel 仅执行 `auth status`、当前用户查询和通知命令。
 
 当前部署信息：
 
@@ -145,7 +136,7 @@ NODE_ENV=production npm start
 
 用户添加的仓位基础配置保存在浏览器 IndexedDB，包含来源、NFT ID、启停状态、预警线与布防状态；价格、估值、手续费、区块和历史采样不会作为基础数据持久化，启动时按来源重新读取链上数据。首次升级时，页面会先把旧 JSON 中的仓位迁移到 IndexedDB，确认成功后才清空 JSON 的 `positions` 数组。
 
-云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，基础仓位从当前浏览器 IndexedDB 恢复。页面打开且存在启用仓位时，会按设置的轮询间隔调用云端刷新；首次越过预警线后由钉钉 OpenAPI 发送一次机器人私聊，回到安全区后重新布防。应用内 DING 与电话 DING 在云端保持关闭。
+云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，基础仓位从当前浏览器 IndexedDB 恢复。页面打开且存在启用仓位时，会按设置的轮询间隔调用云端刷新；DWS 普通私聊、应用内 DING 与电话 DING 在云端均保持关闭。
 
 由于基础 LP 数据按设计只保存在浏览器 IndexedDB，关闭页面后 Vercel Function 无法访问这些仓位，也不会继续轮询。需要页面关闭后仍持续监控、或需要应用内/电话 DING 时，请使用本地生产模式。若未来需要无人值守云端告警，应先引入经过用户授权的云端持久化与定时任务，不能把 IndexedDB 数据静默上传。
 

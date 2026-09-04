@@ -17,7 +17,6 @@ const number = (value: number | null | undefined, digits = 4) => value == null ?
 const compactAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
 const localRuntime: RuntimeCapabilities = { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, notificationProvider: 'dws', positionStorage: 'indexeddb' };
 const positionStore = new IndexedDbPositionStore();
-const cloudMonitorTokenKey = 'lp-sentinel-monitor-token';
 const appVersion = packageInfo.version;
 const changelogReleases = parseChangelog(changelogMarkdown);
 
@@ -131,26 +130,31 @@ function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () =
   </div></div>;
 }
 
-function SettingsDialog({ settings, open, onClose, onSave, onChangelog, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; onChangelog: () => void; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
+function SettingsDialog({ settings, open, onClose, onSave, onChangelog, onAuthUpdated, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; onChangelog: () => void; onAuthUpdated: (value: AppState['notification']) => void; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
   const [form, setForm] = useState(settings);
-  const [monitorToken, setMonitorToken] = useState('');
   const [testStatus, setTestStatus] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
   useEffect(() => setForm(settings), [settings]);
-  useEffect(() => { if (open && runtime.mode === 'vercel') setMonitorToken(window.sessionStorage.getItem(cloudMonitorTokenKey) || ''); }, [open, runtime.mode]);
+  useEffect(() => {
+    if (!open || runtime.notificationProvider !== 'dws') return;
+    setAuthBusy(true);
+    api.notificationAuth().then(onAuthUpdated).catch((error) => setTestStatus((error as Error).message)).finally(() => setAuthBusy(false));
+  }, [open, runtime.notificationProvider]);
   if (!open) return null;
-  const cloudOpenApi = runtime.notificationProvider === 'dingtalk-openapi';
   const cloudMode = runtime.mode === 'vercel';
   return <div className="overlay"><div className="dialog settings-dialog"><button className="icon-button dialog-close" onClick={onClose}><X size={19} /></button><span className="eyebrow">LOCAL SETTINGS</span><h2>监控与通知</h2>
     <label>轮询间隔（秒）<input type="number" min="5" value={form.pollIntervalMs / 1000} onChange={(e) => setForm({ ...form, pollIntervalMs: Number(e.target.value) * 1000 })} /></label>
-    {cloudMode && <div className="info-banner">{cloudOpenApi ? 'Vercel 已接入钉钉 OpenAPI。页面打开期间会按轮询间隔刷新链上仓位并发送越界私聊。' : auth.error || 'Vercel 钉钉 OpenAPI 尚未配置。'}</div>}
-    {cloudOpenApi && <label>云端监控访问口令<input type="password" autoComplete="off" value={monitorToken} onChange={(e) => setMonitorToken(e.target.value)} placeholder="LP_SENTINEL_MONITOR_TOKEN" /></label>}
-    {cloudOpenApi && <button className="secondary wide" disabled={monitorToken.trim().length < 32} onClick={async () => { setTestStatus('发送中…'); try { await api.testNotification(monitorToken.trim()); window.sessionStorage.setItem(cloudMonitorTokenKey, monitorToken.trim()); setTestStatus('测试消息已发送，请检查钉钉私聊。'); } catch (e) { setTestStatus((e as Error).message); } }}>发送测试消息</button>}
+    {cloudMode ? <div className="info-banner">DWS CLI 使用本机 OAuth 登录态，Vercel 无法继承。云端版本保留链上查询与手动刷新，不发送钉钉通知。</div> : <div className="dws-auth-card">
+      <div><strong>DWS CLI OAuth</strong><span>{auth.authenticated ? `已登录${auth.user ? ` · ${auth.user}` : ''}` : auth.error || '尚未登录'}</span></div>
+      <code>dws auth login</code>
+      <p>请在运行 LP Sentinel 的同一用户终端执行登录；凭据由 DWS 自行保存在系统安全存储中，本应用不读取 Token。</p>
+      <div className="dws-auth-actions"><button className="secondary" disabled={authBusy} onClick={async () => { setAuthBusy(true); setTestStatus(''); try { onAuthUpdated(await api.notificationAuth()); } catch (e) { setTestStatus((e as Error).message); } finally { setAuthBusy(false); } }}><RefreshCw className={authBusy ? 'spin' : ''} size={14} /> 刷新登录状态</button><button className="secondary" disabled={authBusy || !auth.authenticated} onClick={async () => { setTestStatus('发送中…'); try { await api.testNotification(); setTestStatus('测试消息已发送，请检查钉钉私聊。'); } catch (e) { setTestStatus((e as Error).message); } }}>发送测试消息</button></div>
+    </div>}
     {testStatus && <div className="info-banner">{testStatus}</div>}
-    <div className="toggle-row"><div><strong>钉钉普通私聊</strong><span>{cloudMode ? auth.authenticated ? auth.user : auth.error || 'OpenAPI 未配置' : auth.authenticated ? `DWS 已登录${auth.user ? ` · ${auth.user}` : ''}` : auth.error || 'DWS 未登录'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.notificationEnabled} onChange={(e) => setForm({ ...form, notificationEnabled: e.target.checked })} /></div>
-    <div className="toggle-row"><div><strong>应用内 DING</strong><span>{cloudMode ? '云端当前只发送机器人普通私聊' : '追加通道，默认关闭'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.dingEnabled} onChange={(e) => setForm({ ...form, dingEnabled: e.target.checked })} /></div>
-    <div className="toggle-row"><div><strong>电话 DING</strong><span>{cloudMode ? '云端保持关闭，不会产生通信费用' : '可能产生通信费用'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications} checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
-    {!cloudMode && (form.dingEnabled || form.dingCallEnabled) && <label>Robot Code<input value={form.dingRobotCode} onChange={(e) => setForm({ ...form, dingRobotCode: e.target.value })} placeholder="开放平台机器人 Robot Code" /></label>}
-    <button className="primary wide" onClick={async () => { if (cloudOpenApi) window.sessionStorage.setItem(cloudMonitorTokenKey, monitorToken.trim()); await onSave(form); onClose(); }}>保存设置</button>
+    <div className="toggle-row"><div><strong>钉钉普通私聊</strong><span>{cloudMode ? '云端不可用' : '使用当前 DWS 登录身份发送给自己'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications || !auth.authenticated} checked={form.notificationEnabled} onChange={(e) => setForm({ ...form, notificationEnabled: e.target.checked })} /></div>
+    <div className="toggle-row"><div><strong>应用内 DING</strong><span>{cloudMode ? '云端不可用' : '使用当前 DWS 身份追加提醒，默认关闭'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications || !auth.authenticated} checked={form.dingEnabled} onChange={(e) => setForm({ ...form, dingEnabled: e.target.checked })} /></div>
+    <div className="toggle-row"><div><strong>电话 DING</strong><span>{cloudMode ? '云端不可用' : '使用当前 DWS 身份；可能产生通信费用'}</span></div><input type="checkbox" disabled={cloudMode || !runtime.notifications || !auth.authenticated} checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
+    <button className="primary wide" onClick={async () => { await onSave(form); onClose(); }}>保存设置</button>
     <button className="version-settings-link" onClick={onChangelog}><ScrollText size={14} /> LP Sentinel v{appVersion} · 查看更新日志</button>
   </div></div>;
 }
@@ -205,9 +209,7 @@ export default function App() {
     const refreshCloud = async () => {
       if (cloudRefreshInFlight.current) return;
       cloudRefreshInFlight.current = true;
-      const monitorToken = window.sessionStorage.getItem(cloudMonitorTokenKey) || undefined;
-      if (state.runtime.notifications && !monitorToken) { cloudRefreshInFlight.current = false; return; }
-      try { await api.refresh(await positionStore.getAll(), monitorToken); await load(); }
+      try { await api.refresh(await positionStore.getAll()); await load(); }
       catch (e) { setError(`云端自动刷新失败：${(e as Error).message}`); }
       finally { cloudRefreshInFlight.current = false; }
     };
@@ -224,9 +226,9 @@ export default function App() {
     <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} onChangelog={() => setChangelogOpen(true)} runtime={state.runtime} />
     <main>
       <header><div><span className="mobile-brand">LP SENTINEL · v{appVersion}</span><h1>{selected ? selected.name : '监控控制台'}</h1>{selected && <div className="header-meta"><StatusPill position={selected} /><span>{selected.source.networkName}</span><span>{selected.source.protocol}</span><span>#{selected.source.tokenId}</span></div>}</div><div className="header-actions">
-        <button className="icon-button" title="钱包" onClick={() => setWalletOpen(true)}><WalletCards size={19} /></button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><SettingsIcon size={19} /></button><button className="secondary refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await mutate(async () => api.refresh(state.runtime.mode === 'vercel' ? await positionStore.getAll() : undefined, state.runtime.mode === 'vercel' ? window.sessionStorage.getItem(cloudMonitorTokenKey) || undefined : undefined)); setRefreshing(false); }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 刷新</button>
+        <button className="icon-button" title="钱包" onClick={() => setWalletOpen(true)}><WalletCards size={19} /></button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><SettingsIcon size={19} /></button><button className="secondary refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await mutate(async () => api.refresh(state.runtime.mode === 'vercel' ? await positionStore.getAll() : undefined)); setRefreshing(false); }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 刷新</button>
       </div></header>
-      {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：基础仓位保存在当前浏览器 IndexedDB；页面打开期间每 {Math.max(5, state.settings.pollIntervalMs / 1000)} 秒刷新链上快照{state.runtime.notifications ? '，越界时通过钉钉 OpenAPI 私聊预警' : '；钉钉 OpenAPI 尚未配置'}。</span></div>}
+      {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：基础仓位保存在当前浏览器 IndexedDB；页面打开期间每 {Math.max(5, state.settings.pollIntervalMs / 1000)} 秒刷新链上快照。DWS CLI 通知仅在本地运行。</span></div>}
       {error && <div className="global-error">{error}<button onClick={() => setError('')}><X size={15} /></button></div>}
       {!selected ? <div className="empty-main"><div className="radar"><div /><div /><div /><Activity /></div><span className="eyebrow">NO POSITIONS YET</span><h2>让每一条 LP 边界都清晰可见</h2><p>输入 Position NFT ID，我们会在已支持网络中并行识别仓位，并生成智能预警线。</p><button className="primary" onClick={() => setLookupOpen(true)}><Search size={17} /> 查询第一个 NFT</button><div className="network-chips"><span>Robinhood · Uniswap V3</span><span>BNB Chain · PancakeSwap V3</span></div></div> : <div className="dashboard">
         <div className="toolbar"><div><Bell size={16} /><span>{selectedFreshness.stale ? '快照已过期，预警判断已暂停' : selected.alertState.armed ? '预警已布防' : `已触发${selected.alertState.lastBoundary === 'lower' ? '下限' : '上限'}，等待价格回归`}</span></div><div><button className="text-button" onClick={() => mutatePosition(() => api.setEnabled(selected.id, !selected.enabled))}>{selected.enabled ? <Pause size={15} /> : <Play size={15} />}{selected.enabled ? '暂停监控' : '恢复监控'}</button><button className="text-button danger-text" onClick={() => window.confirm('仅删除浏览器中的本地监控记录，链上仓位不会变化。确认删除？') && removePosition(selected)}><Trash2 size={15} /> 删除记录</button></div></div>
@@ -235,7 +237,7 @@ export default function App() {
       </div>}
     </main>
     <NftDialog open={lookupOpen} onClose={() => setLookupOpen(false)} onImported={async (position) => { await positionStore.put(toStoredPosition(position)); await load(); }} />
-    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} onChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }} />
+    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onAuthUpdated={(notification) => setState((current) => current ? { ...current, notification } : current)} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} onChangelog={() => { setSettingsOpen(false); setChangelogOpen(true); }} />
     <WalletDialog open={walletOpen} onClose={() => setWalletOpen(false)} />
     <ChangelogDialog open={changelogOpen} onClose={() => setChangelogOpen(false)} />
   </div>;
