@@ -5,12 +5,13 @@ import { ActionStateMachine } from './action-state-machine';
 import { deriveActionStage } from './action-state-machine';
 import { priceFreshness } from './price-freshness';
 import { formatTokenAmount } from './token-selection';
-import type { AppState, LiveLpPosition, LpLookup, Position, Settings } from './types';
+import type { AppState, LiveLpPosition, LpLookup, Position, RuntimeCapabilities, Settings } from './types';
 import { connectPancakeWallet } from './wallet/pancake-v3';
 import { removeAllLiquidity } from './wallet/removal';
 
 const number = (value: number | null | undefined, digits = 4) => value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: digits });
 const compactAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
+const localRuntime: RuntimeCapabilities = { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true };
 
 function StatusPill({ position }: { position: Position }) {
   const fresh = priceFreshness(position.snapshot);
@@ -20,7 +21,7 @@ function StatusPill({ position }: { position: Position }) {
   return <span className={`status ${statusClass}`}>{text}</span>;
 }
 
-function PositionList({ positions, selected, onSelect, onAdd }: { positions: Position[]; selected?: string; onSelect: (id: string) => void; onAdd: () => void }) {
+function PositionList({ positions, selected, onSelect, onAdd, runtime }: { positions: Position[]; selected?: string; onSelect: (id: string) => void; onAdd: () => void; runtime: RuntimeCapabilities }) {
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><Activity size={19} /></div><div><strong>LP Sentinel</strong><span>Liquidity intelligence</span></div></div>
     <button className="primary add-button" onClick={onAdd}><Plus size={17} /> 按 NFT 查询</button>
@@ -32,7 +33,7 @@ function PositionList({ positions, selected, onSelect, onAdd }: { positions: Pos
         <div className="position-copy"><strong>{position.name}</strong><span>{position.source.networkName} · #{position.source.tokenId}</span></div><ChevronRight size={16} />
       </button>)}
     </div>
-    <div className="sidebar-foot"><ShieldCheck size={16} /><span>本地优先 · 只读监控<br />私钥永不离开钱包</span></div>
+    <div className="sidebar-foot"><ShieldCheck size={16} /><span>{runtime.mode === 'vercel' ? '云端会话 · 不持久保存' : '本地优先 · 只读监控'}<br />私钥永不离开钱包</span></div>
   </aside>;
 }
 
@@ -109,15 +110,16 @@ function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () =
   </div></div>;
 }
 
-function SettingsDialog({ settings, open, onClose, onSave, auth }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; auth: AppState['notification'] }) {
+function SettingsDialog({ settings, open, onClose, onSave, auth, runtime }: { settings: Settings; open: boolean; onClose: () => void; onSave: (value: Settings) => Promise<void>; auth: AppState['notification']; runtime: RuntimeCapabilities }) {
   const [form, setForm] = useState(settings);
   useEffect(() => setForm(settings), [settings]);
   if (!open) return null;
   return <div className="overlay"><div className="dialog settings-dialog"><button className="icon-button dialog-close" onClick={onClose}><X size={19} /></button><span className="eyebrow">LOCAL SETTINGS</span><h2>监控与通知</h2>
     <label>轮询间隔（秒）<input type="number" min="5" value={form.pollIntervalMs / 1000} onChange={(e) => setForm({ ...form, pollIntervalMs: Number(e.target.value) * 1000 })} /></label>
-    <div className="toggle-row"><div><strong>钉钉普通私聊</strong><span>{auth.authenticated ? `DWS 已登录${auth.user ? ` · ${auth.user}` : ''}` : auth.error || 'DWS 未登录'}</span></div><input type="checkbox" checked={form.notificationEnabled} onChange={(e) => setForm({ ...form, notificationEnabled: e.target.checked })} /></div>
-    <div className="toggle-row"><div><strong>应用内 DING</strong><span>追加通道，默认关闭</span></div><input type="checkbox" checked={form.dingEnabled} onChange={(e) => setForm({ ...form, dingEnabled: e.target.checked })} /></div>
-    <div className="toggle-row"><div><strong>电话 DING</strong><span>可能产生通信费用</span></div><input type="checkbox" checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
+    {runtime.mode === 'vercel' && <div className="info-banner">Vercel 云端不接入本机 DWS，所有通知通道保持关闭。</div>}
+    <div className="toggle-row"><div><strong>钉钉普通私聊</strong><span>{runtime.mode === 'vercel' ? '仅本地完整模式可用' : auth.authenticated ? `DWS 已登录${auth.user ? ` · ${auth.user}` : ''}` : auth.error || 'DWS 未登录'}</span></div><input type="checkbox" disabled={!runtime.notifications} checked={form.notificationEnabled} onChange={(e) => setForm({ ...form, notificationEnabled: e.target.checked })} /></div>
+    <div className="toggle-row"><div><strong>应用内 DING</strong><span>追加通道，默认关闭</span></div><input type="checkbox" disabled={!runtime.notifications} checked={form.dingEnabled} onChange={(e) => setForm({ ...form, dingEnabled: e.target.checked })} /></div>
+    <div className="toggle-row"><div><strong>电话 DING</strong><span>可能产生通信费用</span></div><input type="checkbox" disabled={!runtime.notifications} checked={form.dingCallEnabled} onChange={(e) => setForm({ ...form, dingCallEnabled: e.target.checked })} /></div>
     {(form.dingEnabled || form.dingCallEnabled) && <label>Robot Code<input value={form.dingRobotCode} onChange={(e) => setForm({ ...form, dingRobotCode: e.target.value })} placeholder="开放平台机器人 Robot Code" /></label>}
     <button className="primary wide" onClick={async () => { await onSave(form); onClose(); }}>保存设置</button>
   </div></div>;
@@ -143,18 +145,19 @@ function WalletDialog({ open, onClose }: { open: boolean; onClose: () => void })
 export default function App() {
   const [state, setState] = useState<AppState | null>(null); const [selectedId, setSelectedId] = useState<string>(); const [error, setError] = useState(''); const [refreshing, setRefreshing] = useState(false);
   const [lookupOpen, setLookupOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [walletOpen, setWalletOpen] = useState(false);
-  const load = useCallback(async () => { try { const next = await api.state(); setState(next); setSelectedId((current) => current && next.positions.some((p) => p.id === current) ? current : next.positions[0]?.id); setError(''); } catch (e) { setError((e as Error).message); } }, []);
+  const load = useCallback(async () => { try { const next = await api.state(); const normalized = { ...next, runtime: next.runtime || localRuntime }; setState(normalized); setSelectedId((current) => current && normalized.positions.some((p) => p.id === current) ? current : normalized.positions[0]?.id); setError(''); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void load(); const timer = window.setInterval(load, 5_000); return () => window.clearInterval(timer); }, [load]);
   const selected = useMemo(() => state?.positions.find((item) => item.id === selectedId), [state, selectedId]);
   const selectedFreshness = priceFreshness(selected?.snapshot);
   const mutate = async (action: () => Promise<unknown>) => { try { await action(); await load(); } catch (e) { setError((e as Error).message); } };
   if (!state) return <div className="boot"><div className="brand-mark"><Activity /></div><LoaderCircle className="spin" /><span>{error || '正在读取本地状态…'}</span></div>;
-  return <div className="app-shell">
-    <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} />
+  return <div className={`app-shell ${state.runtime.mode === 'vercel' ? 'cloud-mode' : ''}`}>
+    <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} runtime={state.runtime} />
     <main>
       <header><div><span className="mobile-brand">LP SENTINEL</span><h1>{selected ? selected.name : '监控控制台'}</h1>{selected && <div className="header-meta"><StatusPill position={selected} /><span>{selected.source.networkName}</span><span>{selected.source.protocol}</span><span>#{selected.source.tokenId}</span></div>}</div><div className="header-actions">
         <button className="icon-button" title="钱包" onClick={() => setWalletOpen(true)}><WalletCards size={19} /></button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><SettingsIcon size={19} /></button><button className="secondary refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await mutate(api.refresh); setRefreshing(false); }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 刷新</button>
       </div></header>
+      {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：不上传本地数据、不持久保存仓位、不启用 DWS；请使用右上角刷新获取最新链上快照。</span></div>}
       {error && <div className="global-error">{error}<button onClick={() => setError('')}><X size={15} /></button></div>}
       {!selected ? <div className="empty-main"><div className="radar"><div /><div /><div /><Activity /></div><span className="eyebrow">NO POSITIONS YET</span><h2>让每一条 LP 边界都清晰可见</h2><p>输入 Position NFT ID，我们会在已支持网络中并行识别仓位，并生成智能预警线。</p><button className="primary" onClick={() => setLookupOpen(true)}><Search size={17} /> 查询第一个 NFT</button><div className="network-chips"><span>Robinhood · Uniswap V3</span><span>BNB Chain · PancakeSwap V3</span></div></div> : <div className="dashboard">
         <div className="toolbar"><div><Bell size={16} /><span>{selectedFreshness.stale ? '快照已过期，预警判断已暂停' : selected.alertState.armed ? '预警已布防' : `已触发${selected.alertState.lastBoundary === 'lower' ? '下限' : '上限'}，等待价格回归`}</span></div><div><button className="text-button" onClick={() => mutate(() => api.setEnabled(selected.id, !selected.enabled))}>{selected.enabled ? <Pause size={15} /> : <Play size={15} />}{selected.enabled ? '暂停监控' : '恢复监控'}</button><button className="text-button danger-text" onClick={() => window.confirm('仅删除本地监控记录，链上仓位不会变化。确认删除？') && mutate(() => api.remove(selected.id))}><Trash2 size={15} /> 删除记录</button></div></div>
@@ -163,7 +166,7 @@ export default function App() {
       </div>}
     </main>
     <NftDialog open={lookupOpen} onClose={() => setLookupOpen(false)} onImported={load} />
-    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} />
+    <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} />
     <WalletDialog open={walletOpen} onClose={() => setWalletOpen(false)} />
   </div>;
 }

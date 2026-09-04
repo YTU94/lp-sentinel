@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from 'express';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { importLivePosition } from './domain/live-lp-import.js';
-import type { LpSourceId } from './domain/types.js';
+import type { LpSourceId, RuntimeCapabilities } from './domain/types.js';
 import { mountStaticApp } from './http/static-app.js';
 import { refreshPositions, startMonitor } from './monitor.js';
 import { lookupLpNft, readBySource, type LpLookupResult } from './services/lp-nft-registry.js';
@@ -15,12 +15,14 @@ import { JsonStore } from './store.js';
 const validTokenId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const asyncRoute = (handler: RequestHandler): RequestHandler => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 
-export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void }): Express {
+export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities }): Express {
   const app = express();
   const lookup = options.lookup || lookupLpNft;
+  const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true };
   app.use(express.json({ limit: '64kb' }));
+  app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next(); });
 
-  app.get('/api/state', (_request, response) => response.json({ ...options.store.get(), serverTime: new Date().toISOString() }));
+  app.get('/api/state', (_request, response) => response.json({ ...options.store.get(), runtime, serverTime: new Date().toISOString() }));
   app.get('/api/tokens/search', asyncRoute(async (request, response) => response.json({ symbols: await searchBinanceSymbols(String(request.query.q || '')) })));
   app.get('/api/lp-nft/:tokenId', asyncRoute(async (request, response) => {
     if (!validTokenId(request.params.tokenId)) return void response.status(400).json({ error: 'NFT ID 必须是正整数' });
@@ -65,7 +67,11 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
   }));
   app.patch('/api/settings', asyncRoute(async (request, response) => {
     const allowed = ['pollIntervalMs', 'notificationEnabled', 'dingEnabled', 'dingCallEnabled', 'dingRobotCode'] as const;
-    const state = await options.store.update((draft) => { for (const key of allowed) if (key in request.body) Object.assign(draft.settings, { [key]: request.body[key] }); if (draft.settings.pollIntervalMs < 5_000) draft.settings.pollIntervalMs = 5_000; });
+    const state = await options.store.update((draft) => {
+      for (const key of allowed) if (key in request.body) Object.assign(draft.settings, { [key]: request.body[key] });
+      if (draft.settings.pollIntervalMs < 5_000) draft.settings.pollIntervalMs = 5_000;
+      if (!runtime.notifications) Object.assign(draft.settings, { notificationEnabled: false, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
+    });
     options.onSettingsChanged?.();
     response.json(state.settings);
   }));

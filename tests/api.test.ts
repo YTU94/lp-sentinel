@@ -53,4 +53,37 @@ describe('LP Sentinel API', () => {
     expect(response.body.pollIntervalMs).toBe(8_000);
     expect(onSettingsChanged).toHaveBeenCalledTimes(1);
   });
+
+  it('reports Vercel runtime limits without exposing local state capabilities', async () => {
+    const app = createApp({
+      store,
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false },
+    });
+    const response = await request(app).get('/api/state').expect(200);
+    expect(response.body.runtime).toEqual({
+      mode: 'vercel',
+      persistent: false,
+      backgroundMonitoring: false,
+      notifications: false,
+    });
+  });
+
+  it('keeps every notification channel disabled on Vercel', async () => {
+    const app = createApp({
+      store,
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false },
+    });
+    const response = await request(app).patch('/api/settings').send({
+      notificationEnabled: true,
+      dingEnabled: true,
+      dingCallEnabled: true,
+      dingRobotCode: 'must-not-be-stored',
+    }).expect(200);
+    expect(response.body).toMatchObject({
+      notificationEnabled: false,
+      dingEnabled: false,
+      dingCallEnabled: false,
+      dingRobotCode: '',
+    });
+  });
 });

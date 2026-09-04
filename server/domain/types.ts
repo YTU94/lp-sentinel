@@ -112,3 +112,10 @@ export interface AppState {
   notification: { authenticated: boolean; user?: string; checkedAt?: string; error?: string };
   updatedAt: string;
 }
+
+export interface RuntimeCapabilities {
+  mode: 'local' | 'vercel';
+  persistent: boolean;
+  backgroundMonitoring: boolean;
+  notifications: boolean;
+}
