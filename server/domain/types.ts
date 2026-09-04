@@ -118,4 +118,16 @@ export interface RuntimeCapabilities {
   persistent: boolean;
   backgroundMonitoring: boolean;
   notifications: boolean;
+  positionStorage: 'indexeddb';
+}
+
+export interface StoredLpPosition {
+  id: string;
+  sourceId: LpSourceId;
+  tokenId: string;
+  enabled: boolean;
+  alertLower: number;
+  alertUpper: number;
+  alertState: AlertState;
+  createdAt: string;
 }

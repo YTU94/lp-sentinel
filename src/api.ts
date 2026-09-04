@@ -1,3 +1,4 @@
+import type { StoredLpPosition } from './indexeddb-position-store';
 import type { AppState, LiveLpPosition, LpLookup, LpSourceId, Position, Settings } from './types';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -11,6 +12,7 @@ export const api = {
   state: () => request<AppState>('/api/state'),
   lookupNft: (tokenId: string) => request<LpLookup>(`/api/lp-nft/${encodeURIComponent(tokenId)}`),
   importNft: (tokenId: string, sourceId: LpSourceId) => request<Position>('/api/positions/from-lp-nft', { method: 'POST', body: JSON.stringify({ tokenId, sourceId }) }),
+  syncPositions: (positions: StoredLpPosition[]) => request<{ positions: Position[] }>('/api/positions/sync', { method: 'PUT', body: JSON.stringify({ positions }) }),
   setEnabled: (id: string, enabled: boolean) => request<Position>(`/api/positions/${id}/enabled`, { method: 'PATCH', body: JSON.stringify({ enabled }) }),
   setAlerts: (id: string, lower: number, upper: number) => request<Position>(`/api/positions/${id}/alerts`, { method: 'PATCH', body: JSON.stringify({ lower, upper }) }),
   remove: (id: string) => request<void>(`/api/positions/${id}`, { method: 'DELETE' }),

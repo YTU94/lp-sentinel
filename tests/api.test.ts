@@ -57,7 +57,7 @@ describe('LP Sentinel API', () => {
   it('reports Vercel runtime limits without exposing local state capabilities', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, positionStorage: 'indexeddb' },
     });
     const response = await request(app).get('/api/state').expect(200);
     expect(response.body.runtime).toEqual({
@@ -65,13 +65,14 @@ describe('LP Sentinel API', () => {
       persistent: false,
       backgroundMonitoring: false,
       notifications: false,
+      positionStorage: 'indexeddb',
     });
   });
 
   it('keeps every notification channel disabled on Vercel', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, positionStorage: 'indexeddb' },
     });
     const response = await request(app).patch('/api/settings').send({
       notificationEnabled: true,
@@ -84,6 +85,32 @@ describe('LP Sentinel API', () => {
       dingEnabled: false,
       dingCallEnabled: false,
       dingRobotCode: '',
+    });
+  });
+
+  it('hydrates runtime positions from IndexedDB base records', async () => {
+    const readPosition = vi.fn().mockResolvedValue(live('bsc-pancake-v3'));
+    const app = createApp({ store, readPosition });
+    const response = await request(app).put('/api/positions/sync').send({
+      positions: [{
+        id: 'local-position',
+        sourceId: 'bsc-pancake-v3',
+        tokenId: '42',
+        enabled: false,
+        alertLower: 0.995,
+        alertUpper: 1.005,
+        alertState: { armed: false, lastBoundary: 'upper' },
+        createdAt: '2026-09-04T00:00:00.000Z',
+      }],
+    }).expect(200);
+
+    expect(readPosition).toHaveBeenCalledWith('bsc-pancake-v3', '42');
+    expect(response.body.positions[0]).toMatchObject({
+      id: 'local-position',
+      enabled: false,
+      alertLower: 0.995,
+      alertUpper: 1.005,
+      alertState: { armed: false, lastBoundary: 'upper' },
     });
   });
 });

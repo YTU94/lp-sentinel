@@ -1,17 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Activity, Bell, BellRing, ChevronRight, CircleDollarSign, ExternalLink, Gauge, LoaderCircle, Pause, Play, Plus, RefreshCw, Search, Settings as SettingsIcon, ShieldCheck, Trash2, WalletCards, X, Zap } from 'lucide-react';
 import { api } from './api';
 import { ActionStateMachine } from './action-state-machine';
 import { deriveActionStage } from './action-state-machine';
 import { priceFreshness } from './price-freshness';
 import { formatTokenAmount } from './token-selection';
+import { IndexedDbPositionStore, storedPositionKey, toStoredPosition } from './indexeddb-position-store';
 import type { AppState, LiveLpPosition, LpLookup, Position, RuntimeCapabilities, Settings } from './types';
 import { connectPancakeWallet } from './wallet/pancake-v3';
 import { removeAllLiquidity } from './wallet/removal';
 
 const number = (value: number | null | undefined, digits = 4) => value == null ? '—' : value.toLocaleString('zh-CN', { maximumFractionDigits: digits });
 const compactAddress = (address: string) => `${address.slice(0, 6)}…${address.slice(-4)}`;
-const localRuntime: RuntimeCapabilities = { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true };
+const localRuntime: RuntimeCapabilities = { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, positionStorage: 'indexeddb' };
+const positionStore = new IndexedDbPositionStore();
 
 function StatusPill({ position }: { position: Position }) {
   const fresh = priceFreshness(position.snapshot);
@@ -33,7 +35,7 @@ function PositionList({ positions, selected, onSelect, onAdd, runtime }: { posit
         <div className="position-copy"><strong>{position.name}</strong><span>{position.source.networkName} · #{position.source.tokenId}</span></div><ChevronRight size={16} />
       </button>)}
     </div>
-    <div className="sidebar-foot"><ShieldCheck size={16} /><span>{runtime.mode === 'vercel' ? '云端会话 · 不持久保存' : '本地优先 · 只读监控'}<br />私钥永不离开钱包</span></div>
+    <div className="sidebar-foot"><ShieldCheck size={16} /><span>{runtime.mode === 'vercel' ? '云端会话 · 浏览器本地存储' : '本地优先 · IndexedDB 存储'}<br />私钥永不离开钱包</span></div>
   </aside>;
 }
 
@@ -89,14 +91,14 @@ function Holdings({ position }: { position: Position }) {
   </section>;
 }
 
-function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () => void; onImported: () => Promise<void> }) {
+function NftDialog({ open, onClose, onImported }: { open: boolean; onClose: () => void; onImported: (position: Position) => Promise<void> }) {
   const [tokenId, setTokenId] = useState('984513');
   const [result, setResult] = useState<LpLookup | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   if (!open) return null;
   const lookup = async () => { setLoading(true); setError(''); setResult(null); try { setResult(await api.lookupNft(tokenId.trim())); } catch (e) { setError((e as Error).message); } finally { setLoading(false); } };
-  const add = async (match: LiveLpPosition) => { setLoading(true); setError(''); try { await api.importNft(tokenId.trim(), match.source.sourceId); await onImported(); onClose(); } catch (e) { setError((e as Error).message); } finally { setLoading(false); } };
+  const add = async (match: LiveLpPosition) => { setLoading(true); setError(''); try { const position = await api.importNft(tokenId.trim(), match.source.sourceId); await onImported(position); onClose(); } catch (e) { setError((e as Error).message); } finally { setLoading(false); } };
   return <div className="overlay" role="dialog" aria-modal="true"><div className="dialog lookup-dialog">
     <button className="icon-button dialog-close" onClick={onClose}><X size={19} /></button><span className="eyebrow">MULTI-NETWORK DISCOVERY</span><h2>按 Position NFT 查询</h2><p>并行探测 Robinhood Chain 与 BNB Chain。同编号跨链命中时，由你选择正确仓位。</p>
     <div className="search-box"><Search size={19} /><span>#</span><input autoFocus value={tokenId} onChange={(e) => setTokenId(e.target.value.replace(/\D/g, ''))} onKeyDown={(e) => e.key === 'Enter' && lookup()} /><button className="primary" disabled={loading || !tokenId} onClick={lookup}>{loading ? <LoaderCircle className="spin" size={17} /> : '查询链上'}</button></div>
@@ -145,11 +147,35 @@ function WalletDialog({ open, onClose }: { open: boolean; onClose: () => void })
 export default function App() {
   const [state, setState] = useState<AppState | null>(null); const [selectedId, setSelectedId] = useState<string>(); const [error, setError] = useState(''); const [refreshing, setRefreshing] = useState(false);
   const [lookupOpen, setLookupOpen] = useState(false); const [settingsOpen, setSettingsOpen] = useState(false); const [walletOpen, setWalletOpen] = useState(false);
-  const load = useCallback(async () => { try { const next = await api.state(); const normalized = { ...next, runtime: next.runtime || localRuntime }; setState(normalized); setSelectedId((current) => current && normalized.positions.some((p) => p.id === current) ? current : normalized.positions[0]?.id); setError(''); } catch (e) { setError((e as Error).message); } }, []);
+  const hydrated = useRef(false);
+  const load = useCallback(async () => {
+    try {
+      let next = await api.state();
+      let stored = await positionStore.getAll();
+      if (!hydrated.current && stored.length === 0 && next.positions.length > 0) {
+        stored = next.positions.map(toStoredPosition);
+        await positionStore.putAll(stored);
+      }
+      const remoteKeys = next.positions.map((position) => storedPositionKey(position.source.sourceId, position.source.tokenId)).sort();
+      const localKeys = stored.map((position) => position.key).sort();
+      if (!hydrated.current || remoteKeys.join('|') !== localKeys.join('|')) {
+        const synced = await api.syncPositions(stored);
+        next = { ...next, positions: synced.positions };
+        hydrated.current = true;
+      }
+      const normalized = { ...next, runtime: next.runtime || localRuntime };
+      await positionStore.putAll(normalized.positions.map(toStoredPosition));
+      setState(normalized);
+      setSelectedId((current) => current && normalized.positions.some((p) => p.id === current) ? current : normalized.positions[0]?.id);
+      setError('');
+    } catch (e) { setError(`本地 IndexedDB 初始化失败：${(e as Error).message}`); }
+  }, []);
   useEffect(() => { void load(); const timer = window.setInterval(load, 5_000); return () => window.clearInterval(timer); }, [load]);
   const selected = useMemo(() => state?.positions.find((item) => item.id === selectedId), [state, selectedId]);
   const selectedFreshness = priceFreshness(selected?.snapshot);
   const mutate = async (action: () => Promise<unknown>) => { try { await action(); await load(); } catch (e) { setError((e as Error).message); } };
+  const mutatePosition = async (action: () => Promise<Position>) => { try { const position = await action(); await positionStore.put(toStoredPosition(position)); await load(); } catch (e) { setError((e as Error).message); } };
+  const removePosition = async (position: Position) => { try { await api.remove(position.id); await positionStore.remove(storedPositionKey(position.source.sourceId, position.source.tokenId)); await load(); } catch (e) { setError((e as Error).message); } };
   if (!state) return <div className="boot"><div className="brand-mark"><Activity /></div><LoaderCircle className="spin" /><span>{error || '正在读取本地状态…'}</span></div>;
   return <div className={`app-shell ${state.runtime.mode === 'vercel' ? 'cloud-mode' : ''}`}>
     <PositionList positions={state.positions} selected={selectedId} onSelect={setSelectedId} onAdd={() => setLookupOpen(true)} runtime={state.runtime} />
@@ -157,15 +183,15 @@ export default function App() {
       <header><div><span className="mobile-brand">LP SENTINEL</span><h1>{selected ? selected.name : '监控控制台'}</h1>{selected && <div className="header-meta"><StatusPill position={selected} /><span>{selected.source.networkName}</span><span>{selected.source.protocol}</span><span>#{selected.source.tokenId}</span></div>}</div><div className="header-actions">
         <button className="icon-button" title="钱包" onClick={() => setWalletOpen(true)}><WalletCards size={19} /></button><button className="icon-button" title="设置" onClick={() => setSettingsOpen(true)}><SettingsIcon size={19} /></button><button className="secondary refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); await mutate(api.refresh); setRefreshing(false); }}><RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 刷新</button>
       </div></header>
-      {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：不上传本地数据、不持久保存仓位、不启用 DWS；请使用右上角刷新获取最新链上快照。</span></div>}
+      {state.runtime.mode === 'vercel' && <div className="cloud-notice"><ShieldCheck size={16} /><span>Vercel 云端会话：基础仓位保存在当前浏览器 IndexedDB，不上传本地 JSON、不启用 DWS；请使用右上角刷新获取最新链上快照。</span></div>}
       {error && <div className="global-error">{error}<button onClick={() => setError('')}><X size={15} /></button></div>}
       {!selected ? <div className="empty-main"><div className="radar"><div /><div /><div /><Activity /></div><span className="eyebrow">NO POSITIONS YET</span><h2>让每一条 LP 边界都清晰可见</h2><p>输入 Position NFT ID，我们会在已支持网络中并行识别仓位，并生成智能预警线。</p><button className="primary" onClick={() => setLookupOpen(true)}><Search size={17} /> 查询第一个 NFT</button><div className="network-chips"><span>Robinhood · Uniswap V3</span><span>BNB Chain · PancakeSwap V3</span></div></div> : <div className="dashboard">
-        <div className="toolbar"><div><Bell size={16} /><span>{selectedFreshness.stale ? '快照已过期，预警判断已暂停' : selected.alertState.armed ? '预警已布防' : `已触发${selected.alertState.lastBoundary === 'lower' ? '下限' : '上限'}，等待价格回归`}</span></div><div><button className="text-button" onClick={() => mutate(() => api.setEnabled(selected.id, !selected.enabled))}>{selected.enabled ? <Pause size={15} /> : <Play size={15} />}{selected.enabled ? '暂停监控' : '恢复监控'}</button><button className="text-button danger-text" onClick={() => window.confirm('仅删除本地监控记录，链上仓位不会变化。确认删除？') && mutate(() => api.remove(selected.id))}><Trash2 size={15} /> 删除记录</button></div></div>
+        <div className="toolbar"><div><Bell size={16} /><span>{selectedFreshness.stale ? '快照已过期，预警判断已暂停' : selected.alertState.armed ? '预警已布防' : `已触发${selected.alertState.lastBoundary === 'lower' ? '下限' : '上限'}，等待价格回归`}</span></div><div><button className="text-button" onClick={() => mutatePosition(() => api.setEnabled(selected.id, !selected.enabled))}>{selected.enabled ? <Pause size={15} /> : <Play size={15} />}{selected.enabled ? '暂停监控' : '恢复监控'}</button><button className="text-button danger-text" onClick={() => window.confirm('仅删除浏览器中的本地监控记录，链上仓位不会变化。确认删除？') && removePosition(selected)}><Trash2 size={15} /> 删除记录</button></div></div>
         <Metrics position={selected} />
-        <div className="content-grid"><div><PriceChannel position={selected} onSave={(lower, upper) => mutate(() => api.setAlerts(selected.id, lower, upper))} /><section className="card action-card"><div className="section-head"><div><span className="eyebrow">ACTION READINESS</span><h2>策略响应阶段</h2></div><span className="read-only"><ShieldCheck size={14} /> 决策辅助</span></div><ActionStateMachine active={deriveActionStage({ currentPrice: selected.currentPrice, rangeLower: selected.rangeLower, rangeUpper: selected.rangeUpper, alertLower: selected.alertLower, alertUpper: selected.alertUpper, alertArmed: selected.alertState.armed, stale: selectedFreshness.stale })} /></section></div><Holdings position={selected} /></div>
+        <div className="content-grid"><div><PriceChannel position={selected} onSave={(lower, upper) => mutatePosition(() => api.setAlerts(selected.id, lower, upper))} /><section className="card action-card"><div className="section-head"><div><span className="eyebrow">ACTION READINESS</span><h2>策略响应阶段</h2></div><span className="read-only"><ShieldCheck size={14} /> 决策辅助</span></div><ActionStateMachine active={deriveActionStage({ currentPrice: selected.currentPrice, rangeLower: selected.rangeLower, rangeUpper: selected.rangeUpper, alertLower: selected.alertLower, alertUpper: selected.alertUpper, alertArmed: selected.alertState.armed, stale: selectedFreshness.stale })} /></section></div><Holdings position={selected} /></div>
       </div>}
     </main>
-    <NftDialog open={lookupOpen} onClose={() => setLookupOpen(false)} onImported={load} />
+    <NftDialog open={lookupOpen} onClose={() => setLookupOpen(false)} onImported={async (position) => { await positionStore.put(toStoredPosition(position)); await load(); }} />
     <SettingsDialog open={settingsOpen} settings={state.settings} auth={state.notification} runtime={state.runtime} onClose={() => setSettingsOpen(false)} onSave={(value) => mutate(() => api.settings(value))} />
     <WalletDialog open={walletOpen} onClose={() => setWalletOpen(false)} />
   </div>;

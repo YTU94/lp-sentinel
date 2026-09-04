@@ -10,7 +10,7 @@
 - 触及预警线时通过 DWS 给当前登录用户发送钉钉私聊。
 - 可选追加应用内 DING 或高优先级电话 DING；两者默认关闭，电话 DING 可能产生通信费用。
 - 越界只报警一次，价格回到安全区后自动重新布防。
-- 数据保存在本机 `data/lp-sentinel.json`。
+- 用户添加的基础 LP 数据保存在当前浏览器的 IndexedDB；服务端设置与通知状态保存在本机 `data/lp-sentinel.json`。
 - 连接浏览器 Binance Wallet，读取 BNB Chain 上由当前地址直接持有的 PancakeSwap V3 Position NFT。
 - 支持先链上预执行、再由钱包签名的流动性移除底层能力；界面第一版开放全部移除并同时领取代币。
 - 按 Position NFT ID 并行识别 Robinhood Chain / Uniswap V3 与 BNB Chain / PancakeSwap V3，无需连接钱包；同一编号跨链重复时展示全部候选供用户选择。
@@ -112,7 +112,7 @@ NODE_ENV=production npm start
 | `BSC_RPC_URL` | BNB Chain RPC |
 | `BSCSCAN_API_KEY` | 自动枚举钱包 Position NFT，可选 |
 | `LP_SENTINEL_PORT` | 生产服务端口，默认 `4317` |
-| `LP_SENTINEL_DATA` | 本地 JSON 文件位置，默认 `data/lp-sentinel.json` |
+| `LP_SENTINEL_DATA` | 服务端设置与通知状态 JSON 文件位置，默认 `data/lp-sentinel.json`；不再持久化基础 LP 仓位 |
 
 ## Vercel 部署
 
@@ -128,7 +128,9 @@ NODE_ENV=production npm start
 | Deployment ID | `dpl_8mwYJt6ZxY2QgDbSDxJkvXGdh1ts` |
 | 对应 Git 提交 | `8742033` |
 
-云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；仓位记录只会短暂存在于 Function 的 `/tmp` 空间，不保证跨冷启动或实例持久化；后台 5 秒监控与全部 DWS/DING 通知强制关闭。需要持续预警和本地钉钉私聊时，请继续使用本地生产模式。
+用户添加的仓位基础配置保存在浏览器 IndexedDB，包含来源、NFT ID、启停状态、预警线与布防状态；价格、估值、手续费、区块和历史采样不会作为基础数据持久化，启动时按来源重新读取链上数据。首次升级时，页面会先把旧 JSON 中的仓位迁移到 IndexedDB，确认成功后才清空 JSON 的 `positions` 数组。
+
+云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，但基础仓位可从当前浏览器 IndexedDB 恢复；后台 5 秒监控与全部 DWS/DING 通知强制关闭。需要页面关闭后继续预警和本地钉钉私聊时，请继续使用本地生产模式。
 
 ## 安全边界
 

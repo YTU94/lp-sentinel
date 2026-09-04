@@ -19,8 +19,11 @@ export const defaultState = (): AppState => ({
 export class JsonStore {
   private state: AppState = defaultState();
   private queue: Promise<void> = Promise.resolve();
+  private persistPositions: boolean;
 
-  constructor(private readonly file: string) {}
+  constructor(private readonly file: string, private readonly options: { positionStorage?: 'json' | 'indexeddb' } = {}) {
+    this.persistPositions = options.positionStorage !== 'indexeddb';
+  }
 
   async load(): Promise<AppState> {
     try {
@@ -30,6 +33,7 @@ export class JsonStore {
       const settings = { ...defaults.settings, ...stored.settings };
       if (legacy && settings.pollIntervalMs === 300_000) settings.pollIntervalMs = 5_000;
       this.state = { ...defaults, ...stored, schemaVersion: 2, settings };
+      if (this.options.positionStorage === 'indexeddb') this.persistPositions = Boolean(stored.positions?.length);
       if (legacy) await this.persist(this.state);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -56,10 +60,18 @@ export class JsonStore {
     return result;
   }
 
+  async completePositionMigration(): Promise<void> {
+    if (this.options.positionStorage !== 'indexeddb' || !this.persistPositions) return;
+    this.persistPositions = false;
+    this.queue = this.queue.then(() => this.persist(this.state));
+    await this.queue;
+  }
+
   private async persist(state: AppState): Promise<void> {
     await mkdir(dirname(this.file), { recursive: true });
     const temporary = `${this.file}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+    const persisted = this.persistPositions ? state : { ...state, positions: [] };
+    await writeFile(temporary, `${JSON.stringify(persisted, null, 2)}\n`, { mode: 0o600 });
     await rename(temporary, this.file);
   }
 }

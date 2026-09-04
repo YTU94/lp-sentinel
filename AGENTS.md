@@ -12,7 +12,7 @@ LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具
 - 链上数据优先；链上快照不可用时不得伪装成实时数据或模拟价值。
 - 预警和 Action 状态机是策略预览与决策辅助，不会在后台自动签名或自动发起交易。
 - 钱包交易必须经过预检，并由用户在钱包中明确确认。
-- 本地 JSON 是当前唯一持久化存储，不引入数据库或云端账户体系。
+- 用户添加的基础 LP 数据以浏览器 IndexedDB 为唯一持久化来源；服务端 JSON 只保存设置、通知状态和迁移前的兼容数据，不引入云端账户体系。
 
 ## 2. 技术框架
 
@@ -23,7 +23,7 @@ LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具
 | 链交互 | `viem` | RPC 读取、合约调用、交易参数与链上格式化 |
 | 后端运行时 | Node.js + Express + TypeScript | REST API、监控轮询、静态资源服务 |
 | 外部行情 | Binance 公共现货接口 | 仅用于没有链上 `source` 的历史模拟仓位 |
-| 数据持久化 | `server/store.ts` 的异步 JSON Store | 保存仓位、快照、历史采样、设置 |
+| 数据持久化 | 浏览器 IndexedDB + `server/store.ts` | IndexedDB 保存基础 LP；JSON 保存服务端设置与通知状态 |
 | 测试 | Vitest + Supertest + jsdom | 领域单测、API 测试、React/浏览器行为测试 |
 | 开发编排 | `concurrently` + `tsx watch` | 前后端并行开发 |
 
@@ -134,9 +134,11 @@ npm run test:watch
 
 ### 3.9 本地状态与静态应用
 
-- `server/store.ts` 的 `JsonStore` 负责异步加载、串行更新和保存。
-- 默认数据文件为 `data/lp-sentinel.json`；它是本地运行数据，不应手工改写来绕过领域校验。
+- `src/indexeddb-position-store.ts` 保存 NFT 来源、Token ID、启停、预警线、布防状态和创建时间，不保存链上快照或历史采样。
+- `server/store.ts` 的 `JsonStore` 负责服务端内存状态、设置与通知状态；IndexedDB 模式下不会继续把仓位写入 JSON。
+- 默认数据文件为 `data/lp-sentinel.json`；升级时其中的旧仓位只作为一次性迁移源，浏览器确认 IndexedDB 写入成功后才清空 `positions`。
 - `GET /api/state` 返回当前仓位、设置、通知配置和服务器时间。
+- `PUT /api/positions/sync` 用经过校验的 IndexedDB 基础记录恢复服务端运行时仓位；链上字段由对应适配器重新读取，不信任客户端提交的 owner、代币或价格。
 - `server/http/static-app.ts` 在生产模式下提供前端静态资源与 SPA fallback。
 
 ## 4. 分层架构与代码地图
@@ -147,6 +149,7 @@ src/
 ├── api.ts                  # 前端 REST 客户端；不得重新加入通用 createPosition
 ├── action-state-machine.tsx# 4 阶段 Action 展示与阶段推导
 ├── price-freshness.ts      # 行情新鲜度
+├── indexeddb-position-store.ts # 浏览器基础 LP 持久化
 ├── token-selection.ts      # token 搜索/选择
 ├── types.ts                # 前端共享模型
 ├── styles.css              # 浅色主题、响应式布局、状态颜色
@@ -157,7 +160,7 @@ src/
 server/
 ├── index.ts                # Express 应用与全部 API 路由
 ├── monitor.ts              # 轮询、刷新快照、APR、告警、通知
-├── store.ts                # JSON 持久化
+├── store.ts                # 服务端内存状态、设置 JSON 与旧仓位迁移
 ├── http/static-app.ts      # 静态资源与 SPA fallback
 ├── domain/
 │   ├── position.ts         # Position 校验与创建
@@ -202,7 +205,8 @@ services → domain（仅做适配/读取，不把 UI 逻辑下沉到服务层�
   → robinhood-v3 或 pancake-v3 读取 Position Manager/Pool/Token
   → live-lp-import 生成 Position + OnchainPositionSnapshot
   → POST /api/positions/from-lp-nft { tokenId, sourceId }
-  → JsonStore 持久化
+  → 浏览器 IndexedDB 持久化基础 LP
+  → PUT /api/positions/sync 恢复服务端运行时仓位
   → monitor 轮询刷新链上快照、APR 和 alert
   → GET /api/state
   → App 详情页展示
@@ -241,6 +245,7 @@ monitor 取得当前价格
 | GET | `/api/lp-nft/:tokenId` | 并行识别并返回所有已支持来源的 NFT 仓位 |
 | GET | `/api/lp/robinhood-uniswap-v3/:tokenId` | 查询 Robinhood NFT 实时链上数据 |
 | POST | `/api/positions/from-lp-nft` | 按 `{ tokenId, sourceId }` 新增指定来源监控仓位 |
+| PUT | `/api/positions/sync` | 用浏览器 IndexedDB 基础记录恢复运行时仓位 |
 | PATCH | `/api/positions/:id/enabled` | 仅通过 `{ enabled: boolean }` 暂停/恢复现有仓位 |
 | DELETE | `/api/positions/:id` | 删除现有监控仓位 |
 | PATCH | `/api/settings` | 更新监控、预警、通知设置 |
@@ -263,7 +268,7 @@ monitor 取得当前价格
 - RPC 读取、行情查询、链上快照默认是只读；任何交易必须显式由用户操作触发。
 - 不在测试中连接真实钱包或广播真实交易；移除流动性测试只验证交易参数、预检和失败分支。
 - 外部接口返回内容进入 UI 前应校验、格式化并标记更新时间/过期状态。
-- `data/lp-sentinel.json` 可能含本地运行状态，不要把它当作固定 fixture，也不要手改生产运行数据。
+- `data/lp-sentinel.json` 可能含设置、通知状态或尚未迁移的旧仓位，不要把它当作固定 fixture，也不要手改生产运行数据。
 
 ## 8. 修改规则
 
@@ -293,7 +298,7 @@ npm run build
 
 - 没有后台自动移除、自动添加、自动 Zap、自动复投或自动签名。
 - 没有短信通知；电话 DING 仅在用户显式启用且权限、Robot Code 完整时可用。
-- 没有数据库、多用户权限、云端同步或跨设备账户。
+- 没有云端数据库、多用户权限、云端同步或跨设备账户；IndexedDB 数据仅属于当前浏览器来源与配置。
 - 没有完整的历史价格曲线、无常损失历史报表或农场奖励聚合。
 - PancakeSwap 目前覆盖直接持有的 V3 Position NFT；复杂托管、质押、Vault 或第三方管理仓位需单独适配。
 - 一小时 APR 依赖监控期间的连续快照；历史不足时只能显示采样中/覆盖时长，不能伪造完整年化值。

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { createApp } from '../server/index.js';
 import { JsonStore } from '../server/store.js';
 
-const store = new JsonStore(join(tmpdir(), 'lp-sentinel-vercel.json'));
+const store = new JsonStore(join(tmpdir(), 'lp-sentinel-vercel.json'), { positionStorage: 'indexeddb' });
 await store.load();
 await store.update((draft) => {
   draft.settings.notificationEnabled = false;
@@ -15,5 +15,5 @@ await store.update((draft) => {
 
 export default createApp({
   store,
-  runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false },
+  runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, positionStorage: 'indexeddb' },
 });

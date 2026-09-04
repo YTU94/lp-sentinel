@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from 'express';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { importLivePosition } from './domain/live-lp-import.js';
-import type { LpSourceId, RuntimeCapabilities } from './domain/types.js';
+import type { LpSourceId, RuntimeCapabilities, StoredLpPosition } from './domain/types.js';
 import { mountStaticApp } from './http/static-app.js';
 import { refreshPositions, startMonitor } from './monitor.js';
 import { lookupLpNft, readBySource, type LpLookupResult } from './services/lp-nft-registry.js';
@@ -15,10 +15,11 @@ import { JsonStore } from './store.js';
 const validTokenId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const asyncRoute = (handler: RequestHandler): RequestHandler => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 
-export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities }): Express {
+export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities }): Express {
   const app = express();
   const lookup = options.lookup || lookupLpNft;
-  const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true };
+  const readPosition = options.readPosition || readBySource;
+  const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, positionStorage: 'indexeddb' };
   app.use(express.json({ limit: '64kb' }));
   app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next(); });
 
@@ -43,10 +44,33 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
     if (!validTokenId(tokenId) || !['robinhood-uniswap-v3', 'bsc-pancake-v3'].includes(String(sourceId))) return void response.status(400).json({ error: '必须提供有效的 tokenId 与 sourceId' });
     if (options.store.get().positions.some((item) => item.source.tokenId === tokenId && item.source.sourceId === sourceId)) return void response.status(409).json({ error: '该仓位已在监控中' });
     const result = await lookup(tokenId);
-    const live = result.matches.find((item) => item.source.sourceId === sourceId) || await readBySource(sourceId!, tokenId);
+    const live = result.matches.find((item) => item.source.sourceId === sourceId) || await readPosition(sourceId!, tokenId);
     const position = importLivePosition(live);
     await options.store.update((draft) => { draft.positions.push(position); });
     response.status(201).json(position);
+  }));
+  app.put('/api/positions/sync', asyncRoute(async (request, response) => {
+    const records = (request.body as { positions?: unknown }).positions;
+    if (!Array.isArray(records) || records.length > 100 || !records.every(isStoredLpPosition)) return void response.status(400).json({ error: 'IndexedDB 仓位数据无效' });
+    const unique = [...new Map((records as StoredLpPosition[]).map((record) => [`${record.sourceId}:${record.tokenId}`, record])).values()];
+    const existing = options.store.get().positions;
+    const positions = await Promise.all(unique.map(async (record) => {
+      const current = existing.find((position) => position.source.sourceId === record.sourceId && position.source.tokenId === record.tokenId);
+      const position = current || importLivePosition(await readPosition(record.sourceId, record.tokenId));
+      const alertsValid = record.alertLower > position.rangeLower && record.alertUpper < position.rangeUpper && record.alertLower < record.alertUpper;
+      return {
+        ...position,
+        id: record.id,
+        enabled: record.enabled,
+        alertLower: alertsValid ? record.alertLower : position.alertLower,
+        alertUpper: alertsValid ? record.alertUpper : position.alertUpper,
+        alertState: alertsValid ? record.alertState : { armed: true, lastBoundary: null },
+        createdAt: record.createdAt,
+      };
+    }));
+    await options.store.update((draft) => { draft.positions = positions; });
+    await options.store.completePositionMigration();
+    response.json({ positions });
   }));
   app.patch('/api/positions/:id/enabled', asyncRoute(async (request, response) => {
     if (typeof request.body.enabled !== 'boolean') return void response.status(400).json({ error: 'enabled 必须是布尔值' });
@@ -82,13 +106,26 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
 }
 
 async function main() {
-  const store = new JsonStore(resolve(process.env.LP_SENTINEL_DATA || 'data/lp-sentinel.json'));
+  const store = new JsonStore(resolve(process.env.LP_SENTINEL_DATA || 'data/lp-sentinel.json'), { positionStorage: 'indexeddb' });
   await store.load();
   store.update(async (draft) => { draft.notification = await getDwsAuthStatus(); }).catch(() => undefined);
   const monitor = startMonitor(store);
   const app = createApp({ store, refresh: monitor.refreshNow, onSettingsChanged: monitor.reschedule });
   const port = Number(process.env.LP_SENTINEL_PORT || 4317);
   app.listen(port, '127.0.0.1', () => console.log(`LP Sentinel running at http://127.0.0.1:${port}`));
+}
+
+function isStoredLpPosition(value: unknown): value is StoredLpPosition {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Partial<StoredLpPosition>;
+  const boundary = record.alertState?.lastBoundary;
+  return typeof record.id === 'string' && record.id.length > 0 && record.id.length <= 128
+    && ['robinhood-uniswap-v3', 'bsc-pancake-v3'].includes(String(record.sourceId))
+    && validTokenId(record.tokenId)
+    && typeof record.enabled === 'boolean'
+    && Number.isFinite(record.alertLower) && Number.isFinite(record.alertUpper)
+    && typeof record.alertState?.armed === 'boolean' && (boundary === null || boundary === 'lower' || boundary === 'upper')
+    && typeof record.createdAt === 'string' && Number.isFinite(Date.parse(record.createdAt));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();
