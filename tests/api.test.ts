@@ -54,25 +54,26 @@ describe('LP Sentinel API', () => {
     expect(onSettingsChanged).toHaveBeenCalledTimes(1);
   });
 
-  it('reports Vercel runtime limits without exposing local state capabilities', async () => {
+  it('reports Vercel OpenAPI notifications without claiming background monitoring', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
     });
     const response = await request(app).get('/api/state').expect(200);
     expect(response.body.runtime).toEqual({
       mode: 'vercel',
       persistent: false,
       backgroundMonitoring: false,
-      notifications: false,
+      notifications: true,
+      notificationProvider: 'dingtalk-openapi',
       positionStorage: 'indexeddb',
     });
   });
 
-  it('keeps every notification channel disabled on Vercel', async () => {
+  it('locks Vercel notification settings to server-side OpenAPI configuration', async () => {
     const app = createApp({
       store,
-      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, positionStorage: 'indexeddb' },
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
     });
     const response = await request(app).patch('/api/settings').send({
       notificationEnabled: true,
@@ -81,7 +82,7 @@ describe('LP Sentinel API', () => {
       dingRobotCode: 'must-not-be-stored',
     }).expect(200);
     expect(response.body).toMatchObject({
-      notificationEnabled: false,
+      notificationEnabled: true,
       dingEnabled: false,
       dingCallEnabled: false,
       dingRobotCode: '',
@@ -112,5 +113,51 @@ describe('LP Sentinel API', () => {
       alertUpper: 1.005,
       alertState: { armed: false, lastBoundary: 'upper' },
     });
+  });
+
+  it('hydrates and refreshes Vercel positions atomically from the request payload', async () => {
+    const readPosition = vi.fn().mockResolvedValue(live('bsc-pancake-v3'));
+    const refresh = vi.fn(async () => store.get());
+    const app = createApp({
+      store,
+      readPosition,
+      refresh,
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
+    });
+    const response = await request(app).post('/api/refresh').send({
+      positions: [{
+        id: 'browser-position',
+        sourceId: 'bsc-pancake-v3',
+        tokenId: '42',
+        enabled: true,
+        alertLower: 0.995,
+        alertUpper: 1.005,
+        alertState: { armed: true, lastBoundary: null },
+        createdAt: '2026-09-04T00:00:00.000Z',
+      }],
+    }).expect(200);
+
+    expect(readPosition).toHaveBeenCalledWith('bsc-pancake-v3', '42');
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(response.body.positions[0].id).toBe('browser-position');
+  });
+
+  it('requires the private monitor token before a Vercel refresh can send alerts', async () => {
+    const refresh = vi.fn(async () => store.get());
+    const app = createApp({
+      store,
+      refresh,
+      monitorToken: '0123456789abcdef0123456789abcdef',
+      runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: true, notificationProvider: 'dingtalk-openapi', positionStorage: 'indexeddb' },
+    });
+
+    await request(app).post('/api/refresh').send({ positions: [] }).expect(401);
+    expect(refresh).not.toHaveBeenCalled();
+
+    await request(app).post('/api/refresh')
+      .set('Authorization', 'Bearer 0123456789abcdef0123456789abcdef')
+      .send({ positions: [] })
+      .expect(200);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

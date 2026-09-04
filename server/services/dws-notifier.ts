@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { AlertBoundary, Position, Settings } from '../domain/types.js';
+import { buildAlertContent, getDingTalkConfig, sendDingTalkAlert } from './dingtalk-notifier.js';
 
 const run = promisify(execFile);
 
@@ -31,16 +32,19 @@ async function getSelfIdentity(): Promise<DwsIdentity> {
 
 export function buildDwsCommands(position: Position, boundary: AlertBoundary, settings: Settings, identity: DwsIdentity, idempotencyKey = randomUUID()): string[][] {
   if (!settings.notificationEnabled) return [];
-  const line = boundary === 'lower' ? '下限' : '上限';
-  const content = `[LP Sentinel] ${position.name} #${position.source.tokenId} 触及${line}预警：${position.currentPrice?.toPrecision(7)}`;
+  const content = buildAlertContent(position, boundary);
   const commands = [['chat', 'message', 'send', '--user', identity.userId, '--content', content, '--idempotency-key', idempotencyKey, '--format', 'json', '--yes']];
   if (settings.dingEnabled && settings.dingRobotCode) commands.push(['ding', 'message', 'send', '--robot-code', settings.dingRobotCode, '--users', identity.userId, '--content', content, '--type', 'app', '--format', 'json', '--yes']);
   if (settings.dingCallEnabled && settings.dingRobotCode) commands.push(['ding', 'message', 'send', '--robot-code', settings.dingRobotCode, '--users', identity.userId, '--content', content, '--type', 'call', '--format', 'json', '--yes']);
   return commands;
 }
 
-export async function notifyPosition(position: Position, boundary: AlertBoundary, settings: Settings) {
+export async function notifyPosition(position: Position, boundary: AlertBoundary, settings: Settings, options: { env?: Record<string, string | undefined>; fetcher?: typeof fetch } = {}) {
   if (!settings.notificationEnabled) return;
+  const env = options.env || process.env;
+  const cloud = getDingTalkConfig(env);
+  if (cloud.config) return sendDingTalkAlert(position, boundary, cloud.config, options.fetcher);
+  if (env.VERCEL) throw new Error(`Vercel 钉钉通知未配置：缺少 ${cloud.missing.join(', ')}`);
   const identity = await getSelfIdentity();
   for (const args of buildDwsCommands(position, boundary, settings, identity)) await run('dws', args, { timeout: 15_000, maxBuffer: 256_000 });
 }

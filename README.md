@@ -7,7 +7,7 @@
 - 通过 Position NFT 查询导入并监控多个 LP；导入时自动带入链上价格、区间、资产和智能预警线。
 - 已导入仓位可暂停/恢复监控、删除本地记录，并可在价格航道中直接拖动上下预警线；链上仓位本身不提供通用编辑入口。
 - 读取链上池价格，并按集中流动性曲线估算当前两种代币构成。
-- 触及预警线时通过 DWS 给当前登录用户发送钉钉私聊。
+- 触及预警线时，本地版通过 DWS 给当前登录用户发送钉钉私聊；Vercel 版通过服务端钉钉 OpenAPI 发送机器人私聊。
 - 可选追加应用内 DING 或高优先级电话 DING；两者默认关闭，电话 DING 可能产生通信费用。
 - 越界只报警一次，价格回到安全区后自动重新布防。
 - 用户添加的基础 LP 数据保存在当前浏览器的 IndexedDB；服务端设置与通知状态保存在本机 `data/lp-sentinel.json`。
@@ -111,12 +111,21 @@ NODE_ENV=production npm start
 | `ROBINHOOD_RPC_URL` | Robinhood Chain RPC；默认使用限流公共节点 |
 | `BSC_RPC_URL` | BNB Chain RPC |
 | `BSCSCAN_API_KEY` | 自动枚举钱包 Position NFT，可选 |
+| `DINGTALK_APP_KEY` | 钉钉企业内部应用 AppKey，仅供服务端读取 |
+| `DINGTALK_APP_SECRET` | 钉钉企业内部应用 AppSecret，必须作为加密环境变量保存 |
+| `DINGTALK_ROBOT_CODE` | 应用机器人的 Robot Code |
+| `DINGTALK_USER_IDS` | 接收预警的企业用户 `userId`，多个值用逗号分隔，最多 20 个 |
+| `LP_SENTINEL_MONITOR_TOKEN` | Vercel 云端刷新访问口令，至少 32 个随机字符，阻止公开站点被滥用发送预警 |
 | `LP_SENTINEL_PORT` | 生产服务端口，默认 `4317` |
 | `LP_SENTINEL_DATA` | 服务端设置与通知状态 JSON 文件位置，默认 `data/lp-sentinel.json`；不再持久化基础 LP 仓位 |
 
 ## Vercel 部署
 
-仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包本机的 `data/lp-sentinel.json`、`.env` 或 DWS 登录态。
+仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包本机的 `data/lp-sentinel.json`、`.env` 或 DWS 登录态。云端发送预警前，需要在 Vercel 项目的 Production、Preview 环境中配置上表四个 `DINGTALK_*` 变量和 `LP_SENTINEL_MONITOR_TOKEN`；这些变量只能由服务端 Function 读取，禁止添加 `VITE_` 前缀。
+
+钉钉企业内部应用需要启用机器人、申请“机器人向员工发消息”等对应权限并完成发布。云端先使用 AppKey/AppSecret 获取短期 `accessToken`，再调用机器人单聊接口；密钥、令牌与接收人 ID 都不会写入 IndexedDB、响应正文或前端构建产物。五项配置缺少任意一项时，界面会明确显示“OpenAPI 尚未配置”，不会回退到不可用的本机 DWS。
+
+`LP_SENTINEL_MONITOR_TOKEN` 用于保护公开部署的刷新接口，避免第三方构造仓位请求向你的钉钉账号发送垃圾预警。把同一口令填入页面“设置 → 云端监控访问口令”；浏览器只把它保存在当前标签会话的 `sessionStorage`，关闭会话后需重新输入。不要使用 AppSecret 或钱包相关信息作为此口令。
 
 当前部署信息：
 
@@ -130,7 +139,9 @@ NODE_ENV=production npm start
 
 用户添加的仓位基础配置保存在浏览器 IndexedDB，包含来源、NFT ID、启停状态、预警线与布防状态；价格、估值、手续费、区块和历史采样不会作为基础数据持久化，启动时按来源重新读取链上数据。首次升级时，页面会先把旧 JSON 中的仓位迁移到 IndexedDB，确认成功后才清空 JSON 的 `positions` 数组。
 
-云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，但基础仓位可从当前浏览器 IndexedDB 恢复；后台 5 秒监控与全部 DWS/DING 通知强制关闭。需要页面关闭后继续预警和本地钉钉私聊时，请继续使用本地生产模式。
+云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，基础仓位从当前浏览器 IndexedDB 恢复。页面打开且存在启用仓位时，会按设置的轮询间隔调用云端刷新；首次越过预警线后由钉钉 OpenAPI 发送一次机器人私聊，回到安全区后重新布防。应用内 DING 与电话 DING 在云端保持关闭。
+
+由于基础 LP 数据按设计只保存在浏览器 IndexedDB，关闭页面后 Vercel Function 无法访问这些仓位，也不会继续轮询。需要页面关闭后仍持续监控、或需要应用内/电话 DING 时，请使用本地生产模式。若未来需要无人值守云端告警，应先引入经过用户授权的云端持久化与定时任务，不能把 IndexedDB 数据静默上传。
 
 ## 安全边界
 

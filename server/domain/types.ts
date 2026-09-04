@@ -118,6 +118,7 @@ export interface RuntimeCapabilities {
   persistent: boolean;
   backgroundMonitoring: boolean;
   notifications: boolean;
+  notificationProvider: 'dws' | 'dingtalk-openapi' | 'none';
   positionStorage: 'indexeddb';
 }
 

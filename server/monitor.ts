@@ -5,7 +5,11 @@ import { JsonStore } from './store.js';
 import { notifyPosition } from './services/dws-notifier.js';
 import { readBySource } from './services/lp-nft-registry.js';
 
-export async function refreshPositions(store: JsonStore, reader: (sourceId: LpSourceId, tokenId: string) => Promise<LiveLpPosition> = readBySource) {
+export async function refreshPositions(
+  store: JsonStore,
+  reader: (sourceId: LpSourceId, tokenId: string) => Promise<LiveLpPosition> = readBySource,
+  notifier: typeof notifyPosition = notifyPosition,
+) {
   const events: Array<{ position: Position; boundary: AlertBoundary }> = [];
   const before = store.get();
   const refreshed = await Promise.all(before.positions.map(async (position) => {
@@ -25,7 +29,14 @@ export async function refreshPositions(store: JsonStore, reader: (sourceId: LpSo
     }
   }));
   await store.update((draft) => { draft.positions = refreshed; });
-  await Promise.allSettled(events.map((event) => notifyPosition(event.position, event.boundary, store.get().settings)));
+  const settings = store.get().settings;
+  const deliveries = await Promise.allSettled(events.map((event) => notifier(event.position, event.boundary, settings)));
+  const failedIds = new Set(deliveries.flatMap((result, index) => result.status === 'rejected' ? [events[index].position.id] : []));
+  if (failedIds.size > 0) {
+    await store.update((draft) => {
+      for (const position of draft.positions) if (failedIds.has(position.id)) position.alertState = { armed: true, lastBoundary: null };
+    });
+  }
   return store.get();
 }
 

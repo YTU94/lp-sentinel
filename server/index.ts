@@ -1,4 +1,5 @@
 import express, { type Express, type RequestHandler } from 'express';
+import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { importLivePosition } from './domain/live-lp-import.js';
@@ -15,11 +16,32 @@ import { JsonStore } from './store.js';
 const validTokenId = (value: unknown): value is string => typeof value === 'string' && /^[1-9]\d*$/.test(value);
 const asyncRoute = (handler: RequestHandler): RequestHandler => (request, response, next) => Promise.resolve(handler(request, response, next)).catch(next);
 
-export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities }): Express {
+export function createApp(options: { store: JsonStore; lookup?: (tokenId: string) => Promise<LpLookupResult>; readPosition?: typeof readBySource; refresh?: () => Promise<unknown>; onSettingsChanged?: () => void; runtime?: RuntimeCapabilities; monitorToken?: string }): Express {
   const app = express();
   const lookup = options.lookup || lookupLpNft;
   const readPosition = options.readPosition || readBySource;
-  const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, positionStorage: 'indexeddb' };
+  const runtime: RuntimeCapabilities = options.runtime || { mode: 'local', persistent: true, backgroundMonitoring: true, notifications: true, notificationProvider: 'dws', positionStorage: 'indexeddb' };
+  const hydratePositions = async (records: StoredLpPosition[]) => {
+    const unique = [...new Map(records.map((record) => [`${record.sourceId}:${record.tokenId}`, record])).values()];
+    const existing = options.store.get().positions;
+    const positions = await Promise.all(unique.map(async (record) => {
+      const current = existing.find((position) => position.source.sourceId === record.sourceId && position.source.tokenId === record.tokenId);
+      const position = current || importLivePosition(await readPosition(record.sourceId, record.tokenId));
+      const alertsValid = record.alertLower > position.rangeLower && record.alertUpper < position.rangeUpper && record.alertLower < record.alertUpper;
+      return {
+        ...position,
+        id: record.id,
+        enabled: record.enabled,
+        alertLower: alertsValid ? record.alertLower : position.alertLower,
+        alertUpper: alertsValid ? record.alertUpper : position.alertUpper,
+        alertState: alertsValid ? record.alertState : { armed: true, lastBoundary: null },
+        createdAt: record.createdAt,
+      };
+    }));
+    await options.store.update((draft) => { draft.positions = positions; });
+    await options.store.completePositionMigration();
+    return positions;
+  };
   app.use(express.json({ limit: '64kb' }));
   app.use('/api', (_request, response, next) => { response.set('Cache-Control', 'no-store'); next(); });
 
@@ -52,25 +74,7 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
   app.put('/api/positions/sync', asyncRoute(async (request, response) => {
     const records = (request.body as { positions?: unknown }).positions;
     if (!Array.isArray(records) || records.length > 100 || !records.every(isStoredLpPosition)) return void response.status(400).json({ error: 'IndexedDB 仓位数据无效' });
-    const unique = [...new Map((records as StoredLpPosition[]).map((record) => [`${record.sourceId}:${record.tokenId}`, record])).values()];
-    const existing = options.store.get().positions;
-    const positions = await Promise.all(unique.map(async (record) => {
-      const current = existing.find((position) => position.source.sourceId === record.sourceId && position.source.tokenId === record.tokenId);
-      const position = current || importLivePosition(await readPosition(record.sourceId, record.tokenId));
-      const alertsValid = record.alertLower > position.rangeLower && record.alertUpper < position.rangeUpper && record.alertLower < record.alertUpper;
-      return {
-        ...position,
-        id: record.id,
-        enabled: record.enabled,
-        alertLower: alertsValid ? record.alertLower : position.alertLower,
-        alertUpper: alertsValid ? record.alertUpper : position.alertUpper,
-        alertState: alertsValid ? record.alertState : { armed: true, lastBoundary: null },
-        createdAt: record.createdAt,
-      };
-    }));
-    await options.store.update((draft) => { draft.positions = positions; });
-    await options.store.completePositionMigration();
-    response.json({ positions });
+    response.json({ positions: await hydratePositions(records as StoredLpPosition[]) });
   }));
   app.patch('/api/positions/:id/enabled', asyncRoute(async (request, response) => {
     if (typeof request.body.enabled !== 'boolean') return void response.status(400).json({ error: 'enabled 必须是布尔值' });
@@ -94,12 +98,21 @@ export function createApp(options: { store: JsonStore; lookup?: (tokenId: string
     const state = await options.store.update((draft) => {
       for (const key of allowed) if (key in request.body) Object.assign(draft.settings, { [key]: request.body[key] });
       if (draft.settings.pollIntervalMs < 5_000) draft.settings.pollIntervalMs = 5_000;
-      if (!runtime.notifications) Object.assign(draft.settings, { notificationEnabled: false, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
+      if (runtime.notificationProvider === 'dingtalk-openapi') Object.assign(draft.settings, { notificationEnabled: runtime.notifications, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
+      else if (!runtime.notifications) Object.assign(draft.settings, { notificationEnabled: false, dingEnabled: false, dingCallEnabled: false, dingRobotCode: '' });
     });
     options.onSettingsChanged?.();
     response.json(state.settings);
   }));
-  app.post('/api/refresh', asyncRoute(async (_request, response) => { response.json(await (options.refresh ? options.refresh() : refreshPositions(options.store))); }));
+  app.post('/api/refresh', asyncRoute(async (request, response) => {
+    if (runtime.mode === 'vercel') {
+      if (runtime.notifications && !validMonitorToken(request.get('authorization'), options.monitorToken)) return void response.status(401).json({ error: '云端监控访问口令无效，请在通知设置中填写' });
+      const records = (request.body as { positions?: unknown }).positions;
+      if (!Array.isArray(records) || records.length > 100 || !records.every(isStoredLpPosition)) return void response.status(400).json({ error: 'Vercel 刷新需要有效的 IndexedDB 仓位数据' });
+      await hydratePositions(records as StoredLpPosition[]);
+    }
+    response.json(await (options.refresh ? options.refresh() : refreshPositions(options.store)));
+  }));
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => { console.error(error instanceof Error ? error.message : 'Unknown server error'); response.status(502).json({ error: '外部服务暂不可用，请稍后重试' }); });
   if (process.env.NODE_ENV === 'production') mountStaticApp(app);
   return app;
@@ -126,6 +139,13 @@ function isStoredLpPosition(value: unknown): value is StoredLpPosition {
     && Number.isFinite(record.alertLower) && Number.isFinite(record.alertUpper)
     && typeof record.alertState?.armed === 'boolean' && (boundary === null || boundary === 'lower' || boundary === 'upper')
     && typeof record.createdAt === 'string' && Number.isFinite(Date.parse(record.createdAt));
+}
+
+function validMonitorToken(authorization: string | undefined, expected: string | undefined): boolean {
+  if (!expected || expected.length < 32 || !authorization?.startsWith('Bearer ')) return false;
+  const provided = Buffer.from(authorization.slice(7));
+  const target = Buffer.from(expected);
+  return provided.length === target.length && timingSafeEqual(provided, target);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) void main();
