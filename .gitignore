@@ -17,12 +17,14 @@ node_modules/
 .vercel/
 dist/
 build/
+.tsbuild/
 .venv/
 __pycache__/
 *.py[cod]
 
 # LP Sentinel runtime
 data/*.json
+data/*.pid
 !data/.gitkeep
 coverage/
 *.tsbuildinfo

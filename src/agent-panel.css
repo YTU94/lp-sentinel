@@ -1,0 +1,87 @@
+.agent-workspace { max-width: 1320px; margin: 0 auto; padding: 28px; font-size: 14px; }
+.agent-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.agent-heading h1 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 8px; }
+.agent-heading p, .agent-hint, .agent-meta { color: var(--muted); line-height: 1.65; }
+.agent-heading p { margin: 0; }
+.agent-connection { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; color: var(--muted); }
+.agent-flow { display: flex; flex-wrap: wrap; gap: 16px; padding: 20px 0; color: var(--sea); border-bottom: 1px solid var(--line); }
+.agent-flow span { display: inline-flex; align-items: center; gap: 16px; }
+.agent-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px 0; }
+.agent-toolbar span { color: var(--muted); font-size: 12px; }
+.agent-launch { display: flex; align-items: end; justify-content: space-between; flex-wrap: wrap; gap: 20px; padding: 22px 0; border-top: 1px solid var(--line); }
+.agent-launch form { flex: 1; min-width: 240px; }
+.agent-workspace label { display: grid; gap: 8px; font-size: 12px; font-weight: 600; }
+.agent-input-row { display: flex; gap: 10px; margin-top: 8px; }
+.agent-workspace select, .agent-workspace input { border: 1px solid var(--line); border-radius: 6px; min-height: 40px; background: var(--paper); color: var(--ink); padding: 8px 10px; min-width: 0; width: 100%; caret-color: var(--sea); }
+.agent-input-row select { flex: 1; }
+.agent-input-row button { flex-shrink: 0; }
+.agent-demo { display: grid; gap: 8px; }
+.agent-demo small { color: var(--muted); font-size: 12px; }
+.agent-columns { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(250px, 1fr); border-top: 1px solid var(--line); }
+.agent-decisions { min-width: 0; padding: 24px 28px 28px 0; }
+.agent-journal { min-width: 0; border-left: 1px solid var(--line); padding: 24px 0 28px 28px; }
+.agent-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 20px; }
+.agent-section-heading h2 { font-size: 18px; margin: 0; }
+.agent-section-heading > span { font-size: 12px; color: var(--muted); }
+.agent-history-label { margin-bottom: 8px; }
+.agent-history { text-overflow: ellipsis; }
+.agent-plan-title { display: flex; align-items: center; gap: 12px; margin-top: 24px; }
+.agent-plan-title h3 { margin: 0; font-size: 22px; }
+.agent-status { padding: 5px 8px; border-radius: 6px; font-size: 12px; background: var(--sea-soft); color: var(--sea); }
+.agent-status.blocked { background: var(--alert-soft); color: var(--alert); }
+.agent-status.ready { background: var(--action-execute-surface); color: var(--action-execute); }
+.agent-reason { line-height: 1.85; margin: 16px 0 10px; max-width: 70ch; }
+.agent-meta { font-size: 12px; overflow-wrap: anywhere; }
+.agent-market, .agent-result dl { display: grid; gap: 12px; margin: 22px 0; font-variant-numeric: tabular-nums; }
+.agent-market > div, .agent-result dl > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+.agent-market dt, .agent-result dt { color: var(--muted); }
+.agent-market dd, .agent-result dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.agent-workspace details { border-top: 1px solid var(--line); padding: 16px 0; }
+.agent-workspace summary { cursor: pointer; font-weight: 600; line-height: 1.6; }
+.agent-workspace summary:focus-visible { outline: 3px solid var(--sea); outline-offset: 4px; }
+.agent-alternatives > div { margin-top: 20px; }
+.agent-alternatives p, .agent-simulation p, .agent-settings p, .agent-result p { line-height: 1.75; font-size: 13px; }
+.agent-workspace h4 { margin: 24px 0 12px; font-size: 14px; }
+.agent-checks { list-style: none; padding: 0; display: grid; gap: 10px; }
+.agent-checks li { display: flex; gap: 8px; line-height: 1.5; }
+.agent-checks svg { flex-shrink: 0; margin-top: 3px; }
+.agent-checks .passed { color: var(--sea); }
+.agent-checks .failed, .agent-failure { color: var(--alert); }
+.agent-simulation { margin-top: 24px; padding-top: 1px; border-top: 1px solid var(--line); }
+.agent-cost-inputs, .agent-policy-inputs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 16px 0; }
+.agent-result { margin-top: 24px; background: var(--sea-soft); padding: 1px 18px 12px; border-radius: 8px; }
+.agent-result h4, .agent-result p { color: var(--sea); }
+.agent-result dt { color: var(--sea); }
+.agent-event-list, .agent-trace { list-style: none; padding: 0; margin: 0; }
+.agent-event-list li { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.agent-event-list li:first-child { padding-top: 0; }
+.agent-event-list li > div { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+.agent-event-list p, .agent-trace p { font-size: 13px; line-height: 1.7; margin: 6px 0; overflow-wrap: anywhere; }
+.agent-event-list time { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.agent-journal > h3 { margin: 28px 0 16px; font-size: 15px; }
+.agent-trace li { padding: 0 0 20px 14px; border-left: 1px solid var(--line); }
+.agent-trace strong { font-size: 13px; color: var(--sea); }
+.agent-trace p { color: var(--muted); }
+.agent-error { display: flex; align-items: flex-start; gap: 10px; background: var(--alert-soft); color: var(--alert); padding: 14px; margin-bottom: 16px; line-height: 1.7; }
+.agent-error svg { flex-shrink: 0; margin-top: 3px; }
+.agent-empty { padding: 36px 12px 56px 0; max-width: 50ch; }
+.agent-empty svg { color: var(--sea); }
+.agent-empty h3 { font-size: 18px; margin: 16px 0 10px; }
+.agent-empty p { color: var(--muted); line-height: 1.85; }
+.agent-workspace button:disabled { opacity: .5; cursor: not-allowed; }
+.agent-workspace .wallet-button { width: auto; min-height: 44px; overflow: visible; white-space: normal; flex-shrink: 0; }
+.agent-workspace .primary-button { min-height: 44px; }
+@media (max-width: 1000px) {
+  .agent-columns { grid-template-columns: 1fr; }
+  .agent-decisions { padding-right: 0; }
+  .agent-journal { border-left: 0; border-top: 1px solid var(--line); padding-left: 0; }
+}
+@media (max-width: 600px) {
+  .agent-workspace { padding: 20px 16px; }
+  .agent-heading { align-items: flex-start; flex-direction: column; gap: 14px; }
+  .agent-toolbar { align-items: flex-start; }
+  .agent-toolbar > div { display: grid; gap: 6px; }
+  .agent-flow, .agent-flow span { gap: 10px; font-size: 12px; }
+  .agent-launch form { min-width: 0; width: 100%; flex-basis: 100%; }
+  .agent-policy-inputs { grid-template-columns: 1fr; }
+}

@@ -1,23 +1,46 @@
+export interface SmartAlertInput {
+  tickLower: number;
+  tickUpper: number;
+  tickSpacing: number;
+  decimals0: number;
+  decimals1: number;
+}
+
 export interface SmartAlertRecommendation {
-  lower: number;
-  upper: number;
+  alertLower: number;
+  alertUpper: number;
+  warningLowerTick: number;
+  warningUpperTick: number;
   bufferRatio: number;
   confirmations: number;
-  sampleIntervalSeconds: number;
+  pollIntervalSeconds: number;
   cooldownSeconds: number;
 }
 
-export function recommendAlerts(rangeLower: number, rangeUpper: number): SmartAlertRecommendation {
-  if (!(rangeLower > 0) || !(rangeUpper > rangeLower)) throw new Error('LP 区间无效');
-  const relativeWidth = (rangeUpper - rangeLower) / ((rangeUpper + rangeLower) / 2);
-  const bufferRatio = relativeWidth <= 0.25 ? 0.2 : relativeWidth >= 0.85 ? 0.08 : 0.125;
-  const inset = (rangeUpper - rangeLower) * bufferRatio;
+export function tickToPrice(tick: number, decimals0: number, decimals1: number) {
+  return Math.pow(1.0001, tick) * Math.pow(10, decimals0 - decimals1);
+}
+
+export function suggestAlertThresholds(input: SmartAlertInput): SmartAlertRecommendation {
+  const span = input.tickUpper - input.tickLower;
+  if (!Number.isInteger(input.tickSpacing) || input.tickSpacing <= 0) throw new Error("tickSpacing 必须大于 0");
+  if (!Number.isInteger(span) || span < input.tickSpacing * 4) throw new Error("LP tick 区间过窄，无法生成安全预警线");
+
+  const bufferRatio = span <= 600 ? 0.2 : span <= 1_800 ? 0.125 : 0.08;
+  const roundedBuffer = Math.round((span * bufferRatio) / input.tickSpacing) * input.tickSpacing;
+  const maximumBuffer = Math.floor(span / input.tickSpacing / 4) * input.tickSpacing;
+  const buffer = Math.min(maximumBuffer, Math.max(input.tickSpacing, roundedBuffer));
+  const warningLowerTick = input.tickLower + buffer;
+  const warningUpperTick = input.tickUpper - buffer;
+
   return {
-    lower: rangeLower + inset,
-    upper: rangeUpper - inset,
+    alertLower: tickToPrice(warningLowerTick, input.decimals0, input.decimals1),
+    alertUpper: tickToPrice(warningUpperTick, input.decimals0, input.decimals1),
+    warningLowerTick,
+    warningUpperTick,
     bufferRatio,
     confirmations: 3,
-    sampleIntervalSeconds: 300,
+    pollIntervalSeconds: 300,
     cooldownSeconds: 14_400,
   };
 }

@@ -1,73 +1,164 @@
-import { evaluateAlert } from './domain/alert-engine.js';
-import { calculateFeeApr1h } from './domain/fee-apr.js';
-import type { AlertBoundary, LiveLpPosition, LpSourceId, Position } from './domain/types.js';
-import { JsonStore } from './store.js';
-import { notifyPosition } from './services/dws-notifier.js';
-import { readBySource } from './services/lp-nft-registry.js';
+import { evaluateAlert } from "./domain/alert-engine.js";
+import { simulateConcentratedPosition } from "./domain/lp-math.js";
+import type { JsonStore } from "./store.js";
+import { fetchBinancePrice } from "./services/binance-price.js";
+import { getDwsIdentity } from "./services/dws-auth.js";
+import { sendNotification } from "./services/dws-notifier.js";
+import { readLpNftBySource } from "./services/lp-nft-registry.js";
+import { chainSnapshotFromLiveLp } from "./domain/live-lp-import.js";
+import { feeSampleFromSnapshot, updateFeeApr1h } from "./domain/fee-apr.js";
+import type { LivePositionSource } from "./domain/position.js";
 
-export async function refreshPositions(
-  store: JsonStore,
-  reader: (sourceId: LpSourceId, tokenId: string) => Promise<LiveLpPosition> = readBySource,
-  notifier: typeof notifyPosition = notifyPosition,
-) {
-  const events: Array<{ position: Position; boundary: AlertBoundary }> = [];
-  const before = store.get();
-  const refreshed = await Promise.all(before.positions.map(async (position) => {
-    if (!position.enabled) return position;
-    try {
-      const live = await reader(position.source.sourceId, position.source.tokenId);
-      if (live.snapshot.stale) {
-        return { ...position, owner: live.owner, liquidity: live.liquidity, currentPrice: live.currentPrice, snapshot: live.snapshot, lastError: live.snapshot.error || '链上快照已过期，已暂停预警判断' };
-      }
-      const history = [...position.history, live.snapshot].filter((sample) => Date.parse(sample.updatedAt) >= Date.now() - 3_900_000).slice(-100);
-      const alert = evaluateAlert(live.currentPrice, position.alertLower, position.alertUpper, position.alertState);
-      const next: Position = { ...position, owner: live.owner, liquidity: live.liquidity, currentPrice: live.currentPrice, snapshot: live.snapshot, history, feeApr1h: calculateFeeApr1h(history), alertState: alert.state, lastError: undefined };
-      if (alert.event) events.push({ position: next, boundary: alert.event });
-      return next;
-    } catch {
-      return { ...position, lastError: '链上刷新失败，保留最后一次已知快照', snapshot: position.snapshot ? { ...position.snapshot, stale: true, error: '链上刷新失败' } : null };
-    }
-  }));
-  await store.update((draft) => { draft.positions = refreshed; });
-  const settings = store.get().settings;
-  const deliveries = await Promise.allSettled(events.map((event) => notifier(event.position, event.boundary, settings)));
-  const failedIds = new Set(deliveries.flatMap((result, index) => result.status === 'rejected' ? [events[index].position.id] : []));
-  if (failedIds.size > 0) {
-    await store.update((draft) => {
-      for (const position of draft.positions) if (failedIds.has(position.id)) position.alertState = { armed: true, lastBoundary: null };
-    });
+type LivePositionUpdate = Pick<Awaited<ReturnType<typeof readLpNftBySource>>,
+  "currentPrice" | "amount0" | "amount1" | "positionValueQuote" |
+  "formattedOwed0" | "formattedOwed1" | "blockNumber" | "updatedAt"
+>;
+
+interface MonitorDependencies {
+  priceProvider: typeof fetchBinancePrice;
+  lpPositionProvider?: (tokenId: bigint, sourceId: LivePositionSource["type"]) => Promise<LivePositionUpdate>;
+  identityProvider: typeof getDwsIdentity;
+  notifier: typeof sendNotification;
+}
+
+const defaultDependencies: MonitorDependencies = {
+  priceProvider: fetchBinancePrice,
+  lpPositionProvider: readLpNftBySource,
+  identityProvider: getDwsIdentity,
+  notifier: sendNotification,
+};
+
+export function nextPollDelay(intervalMs: number, elapsedMs: number) {
+  return Math.max(0, intervalMs - elapsedMs);
+}
+
+export class PositionMonitor {
+  private timer?: NodeJS.Timeout;
+  private checking = false;
+
+  constructor(
+    private readonly store: JsonStore,
+    private readonly dependencies: MonitorDependencies = defaultDependencies,
+    private readonly onChecked?: () => Promise<void>,
+  ) {}
+
+  start() {
+    void this.checkAll();
+    this.schedule();
   }
-  return store.get();
-}
 
-export interface MonitorController {
-  refreshNow: () => Promise<ReturnType<JsonStore['get']>>;
-  reschedule: () => void;
-  stop: () => void;
-}
+  stop() {
+    if (this.timer) clearTimeout(this.timer);
+  }
 
-export function startMonitor(store: JsonStore, refresher: (target: JsonStore) => Promise<ReturnType<JsonStore['get']>> = refreshPositions): MonitorController {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let stopped = false;
-  let inFlight: Promise<ReturnType<JsonStore['get']>> | null = null;
-  const schedule = () => {
-    if (stopped) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => { void refreshNow().catch(() => schedule()); }, Math.max(5_000, store.get().settings.pollIntervalMs));
-    timer.unref?.();
-  };
-  const run = () => {
-    if (!inFlight) inFlight = refresher(store).finally(() => { inFlight = null; });
-    return inFlight;
-  };
-  const refreshNow = async () => {
-    if (timer) clearTimeout(timer);
-    const state = await run();
-    schedule();
-    return state;
-  };
-  const reschedule = () => schedule();
-  const stop = () => { stopped = true; if (timer) clearTimeout(timer); };
-  void refreshNow().catch(() => schedule());
-  return { refreshNow, reschedule, stop };
+  reschedule() {
+    this.stop();
+    this.schedule();
+  }
+
+  async checkAll() {
+    if (this.checking) return;
+    this.checking = true;
+    try {
+      const positions = this.store.snapshot.positions.filter((position) => position.enabled);
+      await Promise.all(positions.map((position) => this.checkOne(position.id)));
+    } finally {
+      this.checking = false;
+      try { await this.onChecked?.(); }
+      catch { console.error("策略事件保存失败；监控将在下一轮继续"); }
+    }
+  }
+
+  private schedule(delayMs?: number) {
+    const interval = Math.max(5, this.store.snapshot.settings.pollIntervalSeconds) * 1_000;
+    this.timer = setTimeout(async () => {
+      const startedAt = Date.now();
+      await this.checkAll();
+      this.schedule(nextPollDelay(interval, Date.now() - startedAt));
+    }, delayMs ?? interval);
+  }
+
+  private async checkOne(id: string) {
+    const original = this.store.snapshot.positions.find((item) => item.id === id);
+    if (!original) return;
+    let priceRead = false;
+    try {
+      const livePosition = original.source
+        ? await (this.dependencies.lpPositionProvider ?? readLpNftBySource)(BigInt(original.source.tokenId), original.source.type)
+        : undefined;
+      const price = livePosition?.currentPrice ?? await this.dependencies.priceProvider(original.symbol);
+      const chainSnapshot = livePosition
+        ? chainSnapshotFromLiveLp(livePosition, original.baseAsset, original.quoteAsset)
+        : undefined;
+      priceRead = true;
+      const alertResult = evaluateAlert(original.alertState, price, original.alertLower, original.alertUpper);
+      const simulation = simulateConcentratedPosition({
+        capitalQuote: original.capitalQuote,
+        currentPrice: price,
+        referencePrice: original.entryPrice,
+        lowerPrice: original.lowerPrice,
+        upperPrice: original.upperPrice,
+      });
+      const now = new Date().toISOString();
+      const identityRequest = alertResult.event ? this.dependencies.identityProvider() : undefined;
+      const pricePersistence = this.store.update((data) => {
+        const position = data.positions.find((item) => item.id === id);
+        if (!position) return;
+        if (chainSnapshot) {
+          let history = position.chainHistory;
+          if ((!history || history.length === 0) && position.chainSnapshot) {
+            history = [feeSampleFromSnapshot(position.chainSnapshot, position.currentPrice ?? price)];
+          }
+          const feeWindow = updateFeeApr1h(history, feeSampleFromSnapshot(chainSnapshot, price));
+          chainSnapshot.feeApr1h = feeWindow.feeApr1h;
+          position.chainHistory = feeWindow.history;
+        }
+        Object.assign(position, { currentPrice: price, priceUpdatedAt: now, priceReadFailed: false, simulation, chainSnapshot, lastError: undefined });
+        if (!alertResult.event) position.alertState = alertResult.state;
+      }).then(() => ({ error: undefined }), (error: unknown) => ({ error }));
+
+      if (alertResult.event) {
+        const identity = await identityRequest!;
+        if (!identity.authenticated || !identity.userId) throw new Error(identity.error || "DWS 尚未登录");
+        const sideText = alertResult.event.side === "upper" ? "上限" : "下限";
+        const message = [
+          `【${original.name}】价格触及${sideText}预警`,
+          `当前价格：${price} ${original.quoteAsset}`,
+          `预警价格：${alertResult.event.threshold} ${original.quoteAsset}`,
+          `LP 区间：${original.lowerPrice} — ${original.upperPrice}`,
+          `状态：${simulation.status === "in-range" ? "区间内" : "已出区间"}`,
+        ].join("\n");
+        const settings = this.store.snapshot.settings;
+        const delivery = await this.dependencies.notifier({
+          userId: identity.userId,
+          message,
+          dingEnabled: settings.dingEnabled,
+          dingCallEnabled: settings.dingCallEnabled,
+          robotCode: settings.dingRobotCode,
+        });
+        const persistence = await pricePersistence;
+        if (persistence.error) throw persistence.error;
+        await this.store.update((data) => {
+          const position = data.positions.find((item) => item.id === id);
+          if (!position) return;
+          position.alertState = alertResult.state;
+          position.lastAlertAt = new Date().toISOString();
+          position.lastError = delivery.dingError
+            ? `普通消息已发送；DING 发送失败：${delivery.dingError}`
+            : undefined;
+        });
+      } else {
+        const persistence = await pricePersistence;
+        if (persistence.error) throw persistence.error;
+      }
+    } catch (error) {
+      await this.store.update((data) => {
+        const position = data.positions.find((item) => item.id === id);
+        if (position) {
+          position.lastError = error instanceof Error ? error.message : "监控失败";
+          if (!priceRead) position.priceReadFailed = true;
+        }
+      });
+    }
+  }
 }

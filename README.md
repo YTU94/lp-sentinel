@@ -2,25 +2,34 @@
 
 本地运行的集中流动性 LP 监控、模拟与价格预警工具。
 
-当前版本：**v0.3.0**。应用桌面侧栏、移动端标题和设置页都会显示版本号，点击“更新日志”可直接查看内置版本记录。完整记录见 [`CHANGELOG.md`](./CHANGELOG.md)。
+「策略 Agent」从钱包地址开始，通过 Revert Finance 索引查询六条链的活跃 LP，选中后在右侧查看 HOLD 基准损益、APR、手续费与奖励，并点击获取本机 Codex 的优化建议。支持 Uniswap V3、PancakeSwap V3、Aero CL 与 Aerodrome CL 的多个部署。地址保存在浏览器 IndexedDB，股票身份按发行方合约目录识别。见 [地址查仓与 AI 分析](docs/wallet-agent.md)。
 
-发布新版本时，以 `package.json` 的 `version` 为应用版本单一来源，并在 `CHANGELOG.md` 顶部增加对应版本；前端构建会自动带入两者，无需另行维护界面常量。
+当前主界面仅保留策略 Agent，并占满可用宽度。左侧模块菜单、独立 NFT 查询、旧监控详情和钱包交易页面已移除；顶部刷新与报警设置、Agent 内的 LP 列表和每日 APR 继续使用。
 
-## MVP 能力
+原事件驱动分析、代码风控、成本模拟和复盘记忆保留在「高级：事件观察与成本演练」。详见 [事件 Agent 使用与架构](docs/strategy-agent.md)。
+
+离线研究流程支持三个 Ethereum Uniswap V3 池的连续 30 天小时数据、前 21 天参数校准、后 9 天隔离测试，以及手续费/调仓成本压力模拟。需要可访问的 The Graph 数据源；合成演练不代表真实回测。见 [LP 历史研究与复现](docs/lp-research.md)。
+
+LP 策略思路与迭代记录统一从 [Memory 知识库](MEMORY.md) 查阅，包含现有策略、参数边界、指标口径、实验依据及升级模板。
+
+## 本地兼容监控能力
+
+以下为保留的后端和底层能力；独立 NFT 导入、监控详情与钱包操作界面已移除，既有本地记录继续保留。
 
 - 通过 Position NFT 查询导入并监控多个 LP；导入时自动带入链上价格、区间、资产和智能预警线。
-- 已导入仓位可暂停/恢复监控、删除本地记录，并可在价格航道中直接拖动上下预警线；链上仓位本身不提供通用编辑入口。
-- 读取链上池价格，并按集中流动性曲线估算当前两种代币构成。
-- 触及预警线时，本地版通过 DWS CLI OAuth 登录态给当前用户发送钉钉私聊；应用不读取或保存 Token。
+- 已导入仓位的兼容接口可暂停/恢复监控、删除本地记录及调整上下预警线；链上仓位本身不提供通用编辑入口。
+- 读取 Binance 现货公共行情，并按集中流动性曲线估算当前两种代币构成。
+- 触及预警线时通过 DWS 给当前登录用户发送钉钉私聊。
 - 可选追加应用内 DING 或高优先级电话 DING；两者默认关闭，电话 DING 可能产生通信费用。
 - 越界只报警一次，价格回到安全区后自动重新布防。
-- 用户添加的基础 LP 数据保存在当前浏览器的 IndexedDB；服务端设置与通知状态保存在本机 `data/lp-sentinel.json`。
+- 数据保存在本机 `data/lp-sentinel.json`。
 - 连接浏览器 Binance Wallet，读取 BNB Chain 上由当前地址直接持有的 PancakeSwap V3 Position NFT。
-- 支持先链上预执行、再由钱包签名的流动性移除底层能力；界面第一版开放全部移除并同时领取代币。
-- 按 Position NFT ID 并行识别 Robinhood Chain / Uniswap V3 与 BNB Chain / PancakeSwap V3，无需连接钱包；同一编号跨链重复时展示全部候选供用户选择。
+- 保留先链上预执行、再由钱包签名的部分/全部流动性移除底层构造能力，当前主界面不提供交易操作入口。
+- 按 Position NFT ID 并行识别 Robinhood Chain / Uniswap V3、BNB Chain / PancakeSwap V3 与 Base / Uniswap V3，无需连接钱包；同一编号跨链重复时展示全部候选供用户选择。
 - 根据 LP tick 宽度自动生成上下预警线，并可一键加入本地持续监控；后续刷新始终使用链上池价格。
+- 回放 Position Manager 的 IncreaseLiquidity、DecreaseLiquidity 与 Collect 事件，在详情页展示累计投入/移除/领取、已领取与未领取手续费、相对持币损益、ROI、历史费 APR、仓位年龄和交易 gas。
 
-> LP Sentinel 不读取、保存私钥或代替用户签名。真实仓位与钱包仓位在界面中明确隔离，任何移除交易都必须由钱包逐笔确认。
+> LP Sentinel 不读取、保存私钥或代替用户签名。真实仓位与模拟仓位在界面中明确隔离，任何移除交易都必须由钱包逐笔确认。
 
 ## 启动
 
@@ -38,7 +47,7 @@ npm run dev
 dws auth status --format json
 ```
 
-如果尚未登录，运行 `dws auth login`。设置页可刷新登录状态并发送测试消息；应用内/电话 DING 也使用当前 DWS 用户身份，不再需要 Robot Code。当前 Vercel 运行时无法继承本机 DWS 登录态，因此只在本地运行时提供钉钉通知。
+如果尚未登录，运行 `dws auth login`。追加应用内/电话 DING 还需要在设置中填写开放平台机器人的 Robot Code。
 
 ## 验证
 
@@ -52,13 +61,14 @@ NODE_ENV=production npm start
 
 ## 多网络 LP NFT 查询
 
-页面中的“按 NFT 查询”默认带入示例 NFT `#984513`。系统会并行探测已注册的链与协议，查询返回交易对、持有人、池地址、手续费档位、tick、当前价格、区间、代币构成、仓位估值和建议预警线。NFT ID 不是全局唯一标识；若多个网络存在同编号 NFT，必须按网络、协议和交易对选择后再加入预警。
+独立“按 NFT 查询”模块已移除。兼容后端仍可并行探测已注册的链与协议，查询返回交易对、持有人、池地址、手续费档位、tick、当前价格、区间、代币构成、仓位估值和建议预警线。NFT ID 不是全局唯一标识；兼容接口调用者需按网络、协议和交易对确认来源后再导入。
 
 - Robinhood Chain（chain ID `4663`）/ Uniswap V3；RPC 可通过 `ROBINHOOD_RPC_URL` 覆盖。
 - BNB Chain（chain ID `56`）/ PancakeSwap V3；RPC 可通过 `BSC_RPC_URL` 覆盖。
+- Base（chain ID `8453`）/ Uniswap V3；默认使用 Base 官方公共 RPC，并可通过 `BASE_RPC_URL` 覆盖。
 - 统一查询接口：`GET /api/lp-nft/:tokenId`，返回 `matches` 与每个平台的脱敏 `probes`。
 - 导入预警：`POST /api/positions/from-lp-nft`，JSON 请求体必须明确来源，例如 `{ "tokenId": "7314935", "sourceId": "bsc-pancake-v3" }`。
-- 兼容查询接口：`GET /api/lp/robinhood-uniswap-v3/:tokenId`；新界面不依赖此单链接口。
+- 兼容查询接口：`GET /api/lp/robinhood-uniswap-v3/:tokenId`；新界面不再依赖此单链接口。
 
 当前来源标识：
 
@@ -66,6 +76,16 @@ NODE_ENV=production npm start
 | --- | --- | --- | --- |
 | `robinhood-uniswap-v3` | Robinhood Chain | Uniswap V3 | Position Manager + Pool 公开 RPC |
 | `bsc-pancake-v3` | BNB Chain | PancakeSwap V3 | Position Manager + Pool 公开 RPC |
+| `base-uniswap-v3` | Base | Uniswap V3 | Position Manager + Pool 公开 RPC |
+| `ethereum-uniswap-v3` | Ethereum | Uniswap V3 | Position Manager + Pool 公开 RPC |
+| `arbitrum-uniswap-v3` | Arbitrum | Uniswap V3 | Position Manager + Pool 公开 RPC |
+| `optimism-uniswap-v3` | Optimism | Uniswap V3 | Position Manager + Pool 公开 RPC |
+
+地址查询使用 Revert 索引，`base-aerodrome` 聚合 `aero / aerodrome / aerodromev2 / aerodromev3` 四个 CL 部署及其识别的质押归属。各来源逐页返回，错误、停止和索引过期分别提示。来源、绩效字段和接入范围见[地址查询说明](docs/wallet-agent.md)。
+
+本机 Codex 接入使用独立的 loopback API。macOS 首次运行 `npm run codex:install` 安装启动器并验证 ready，也可运行 `npm run codex:bridge` 从终端启动。页面标题右侧每 10 秒显示连接状态，并提供“修复”入口。安装启动器的这台电脑可在正式页面使用本机 CLI 分析，完整启动方式与浏览器权限说明见[本机 Codex API](docs/wallet-agent.md#本机-codex-api-与启动器)。
+
+选中 LP 后可查看按北京时间分天的 24 小时有效区间图。历史优先采用 Revert 快照，缺口通过池价事件和 NFT 流动性状态回放校准，同时展示每日历史覆盖率与事件校准时长。派生结果使用 5 分钟内存缓存，读取失败的时段保留缺口，并支持主动重试。回放需要支持历史调用与日志的 RPC，配置和精度口径见[每日有效区间说明](docs/wallet-agent.md#每日有效区间时间)。
 
 统一查询的处理规则：
 
@@ -74,26 +94,28 @@ NODE_ENV=production npm start
 3. `probes` 只返回“已识别 / 未找到 / 暂不可用”等简洁诊断，不把完整 RPC 或合约异常堆栈暴露到界面。
 4. 用户选择候选后，以 `tokenId + sourceId` 作为仓位身份加入监控；后续刷新继续使用同一链上适配器。
 
-已验证样本 `#7314935` 应识别为 BNB Chain / PancakeSwap V3 的 `WBNB / SPCXB` 仓位；它在 Robinhood Chain / Uniswap V3 中不存在。样本仅用于验证识别能力，价格、区块和持仓仍以实时链上结果为准。
+已验证样本包括 BNB Chain / PancakeSwap V3 的 `#7314935`，以及 Base / Uniswap V3 的 `#5949035`。样本仅用于验证识别能力，价格、区块和持仓仍以实时链上结果为准。
 
-智能预警依据区间相对宽度，把上下预警线放在边界内侧：窄区间使用 20% 缓冲、常规集中区间使用 12.5%、宽区间使用 8%。推荐参数同时包含 3 次确认、5 分钟采样和 4 小时冷却，当前版本自动应用价格预警线；报警引擎按全局轮询设置采样，并采用“单次触界报警、回到安全区后重新布防”的语义。
+智能预警会依据 tick 区间宽度，把上下预警线放在边界内侧：窄区间使用 20% 缓冲、常规集中区间使用 12.5%、宽区间使用 8%。推荐参数同时返回 3 次确认、5 分钟采样和 4 小时冷却，当前版本自动应用的是价格预警线；报警引擎仍按全局轮询设置采样，并采用“单次触界报警、回到安全区后重新布防”的现有语义。
 
-## 链上快照实时性
+> NFT 查询与加入预警均为只读链上操作。受监控仓位不会被自动移除或重新添加；任何资产操作都必须另行实现钱包签名、预执行和交易确认流程。
 
-一次仓位刷新会先确定目标区块，再把 NFT、池、代币、tick 与手续费累计值全部固定在该区块读取，避免把不同区块的数据拼成一个快照。当前价格和代币构成使用池的精确 `sqrtPriceX96` 计算。快照同时保存目标区块、读取结束时的链头、区块差、区块时间和本机观测时间。
+### 链上仓位分析口径
 
-- **链上实时**：目标区块的实际时间距当前不超过 30 秒。高速出块网络不会再因为读取期间自然前进了较多区块而被误判为延迟。
-- **链上延迟**：目标区块距当前超过 30 秒、但尚未超过 10 分钟；区块差作为诊断信息继续展示。
-- **数据已过期**：观测时间超过 10 分钟、RPC 读取失败、快照已被服务端标记异常，或采集到的目标区块时间已经落后本机超过 60 秒。区块差会继续原样展示，但不会脱离实际区块时间，用固定块数阈值误判出块速度较快的网络。
-
-过期快照只作为“最后已知值”展示，不写入 APR 历史、不改变报警布防状态、不触发钉钉通知，也不参与 Action 阶段判断。服务启动时会立即刷新一次；默认每 5 秒轮询，修改轮询间隔后新周期立即生效。旧版本未显式配置过的 5 分钟默认值会在首次启动时迁移为 5 秒。
-
-> NFT 查询与加入预警均为只读链上操作。受监控仓位不会被自动移除或重新添加；任何资产操作都必须经过钱包签名、预执行和交易确认流程。
+- “累计投入 / 移除 / 领取”直接来自 Position Manager 的 NFT 生命周期事件；首次读取会扫描该 NFT 的历史事件，结果按 RPC 客户端缓存 5 分钟。
+- `Collect` 同时可能包含已移除本金和手续费。系统按事件顺序先冲减尚未领取的移除本金，再把余额计为已领取手续费，避免把移除本金整体误报为收益。
+- 历史投入、移除、领取和已领取手续费使用事件发生前最近一笔 Pool Swap 的 `sqrtPriceX96` 估值；“池子净损益”采用“当前本金 + 累计领取 − 累计投入”，“资金效率 ROI”以累计投入为分母。该口径接近 Revert 的现金流分析，但不等同于税务成本或法币入金收益率。
+- 若事件前 100 万个区块内没有可用 Swap，历史分析会安全降级为待回填，不使用当前价格伪造历史估值。
+- gas 统计为涉及该 NFT 生命周期事件的整笔交易 gas；一笔交易若还执行了其他操作，无法仅靠标准事件精确拆分到该仓位。
+- Robinhood 默认 RPC 已可直接读取完整历史。BNB 与 Base 公共 RPC 通常不保证归档日志；分别设置支持 `eth_getLogs` 全历史查询的 `BSC_HISTORY_RPC_URL`、`BASE_HISTORY_RPC_URL`（也可让对应自有 RPC 同时承担历史读取），配置后会在下一轮自动回填，未配置时页面会明确提示而不会伪造指标。
+- 标准 V3 Position Manager 事件不能可靠判断某次增加流动性是否来自手续费复投，也不包含外部 Farm 奖励；因此不会把“复投”和“奖励”伪装成可验证的链上字段。
 
 ## 真实 PancakeSwap V3 仓位
 
-- 默认优先 RPC：`https://bsc-rpc.publicnode.com`，失败时回退到 `https://bsc-dataseed.binance.org`；可通过 `BSC_RPC_URL` 完全替换。
-- 配置 `BSCSCAN_API_KEY` 后可自动枚举钱包持有的 Position NFT；未配置时可在页面输入 Token ID 导入，读取结果仍会通过链上 `ownerOf` 校验。
+此独立操作页面已移除，以下为保留的底层实现约定。策略 Agent 的地址查仓与建议不触发钱包交易。
+
+- 默认 RPC：`https://bsc-dataseed.binance.org`，可通过 `BSC_RPC_URL` 替换。
+- 配置 `BSCSCAN_API_KEY` 后可自动枚举钱包持有的 Position NFT；未配置时兼容读取接口接受 Token ID，读取结果仍会通过链上 `ownerOf` 校验。
 - 第一版只支持由钱包地址直接持有的 BNB Chain PancakeSwap V3 仓位；已质押到 MasterChef/Farm、V2 LP 和 Infinity 仓位暂不支持。
 - 移除流程固定使用 0.5% 滑点保护，20 分钟截止时间，将 `decreaseLiquidity` 与 `collect` 合并为一次钱包交易；不会自动销毁空 NFT。
 
@@ -104,46 +126,4 @@ NODE_ENV=production npm start
 - 价格持续位于同一侧：不重复发送。
 - 价格回到两条预警线之间：自动重新布防。
 
-普通私聊默认开启。应用内 DING 和电话 DING 是两个独立追加通道，统一使用当前 DWS 登录身份，不会替代普通消息；电话通道仅在明确启用后生效。
-
-## 环境变量
-
-复制 `.env.example` 后按需填写；不要提交含凭据的 `.env` 文件。
-
-| 变量 | 说明 |
-| --- | --- |
-| `ROBINHOOD_RPC_URL` | Robinhood Chain RPC；默认使用限流公共节点 |
-| `BSC_RPC_URL` | BNB Chain RPC |
-| `BSCSCAN_API_KEY` | 自动枚举钱包 Position NFT，可选 |
-| `LP_SENTINEL_PORT` | 生产服务端口，默认 `4317` |
-| `LP_SENTINEL_DATA` | 服务端设置与通知状态 JSON 文件位置，默认 `data/lp-sentinel.json`；不再持久化基础 LP 仓位 |
-
-## Vercel 部署
-
-仓库包含 Vite 静态站点与 Express Function 的 Vercel 配置。Vercel 部署不会打包 DWS CLI，也无法继承本机 OAuth 登录态，因此云端版本不发送钉钉通知，不需要配置 AppKey、AppSecret、Robot Code 或监控口令。链上 NFT 查询、钱包连接、浏览器 IndexedDB 仓位和页面打开期间的链上刷新仍然可用。
-
-需要钉钉预警时，请在运行 LP Sentinel 的同一系统用户下安装 DWS CLI，执行 `dws auth login`，再从设置页刷新状态并发送测试消息。DWS 自行管理 OAuth Token 的安全存储与刷新；LP Sentinel 仅执行 `auth status`、当前用户查询和通知命令。
-
-当前部署信息：
-
-| 项目 | 内容 |
-| --- | --- |
-| Vercel 项目 | [`ytu94s-projects/lp-sentinel`](https://vercel.com/ytu94s-projects/lp-sentinel) |
-| 当前环境 | Preview（受 Vercel Deployment Protection 保护，尚未发布到生产环境） |
-| Preview 地址 | [`lp-sentinel-hzj4159rj-ytu94s-projects.vercel.app`](https://lp-sentinel-hzj4159rj-ytu94s-projects.vercel.app) |
-| Deployment ID | `dpl_4FJSUJwfy2h3vC1FefEUQ3McfSaF` |
-| 对应 Git 提交 | `10d0fbc` |
-
-用户添加的仓位基础配置保存在浏览器 IndexedDB，包含来源、NFT ID、启停状态、预警线与布防状态；价格、估值、手续费、区块和历史采样不会作为基础数据持久化，启动时按来源重新读取链上数据。首次升级时，页面会先把旧 JSON 中的仓位迁移到 IndexedDB，确认成功后才清空 JSON 的 `positions` 数组。
-
-云端运行采用明确标识的会话模式：链上 NFT 查询、钱包连接和手动刷新可用；运行时快照只会短暂存在于 Function 的 `/tmp` 空间，基础仓位从当前浏览器 IndexedDB 恢复。页面打开且存在启用仓位时，会按设置的轮询间隔调用云端刷新；DWS 普通私聊、应用内 DING 与电话 DING 在云端均保持关闭。
-
-由于基础 LP 数据按设计只保存在浏览器 IndexedDB，关闭页面后 Vercel Function 无法访问这些仓位，也不会继续轮询。需要页面关闭后仍持续监控、或需要应用内/电话 DING 时，请使用本地生产模式。若未来需要无人值守云端告警，应先引入经过用户授权的云端持久化与定时任务，不能把 IndexedDB 数据静默上传。
-
-## 安全边界
-
-- 所有监控、查询与导入操作均为只读。
-- LP Sentinel 不读取或保存私钥、助记词和浏览器钱包凭据。
-- 移除交易只在用户点击后构造，先通过 RPC 预执行，再显示钱包确认。
-- 不会后台自动移除、自动 Zap、自动复投、自动签名或销毁 NFT。
-- 链上刷新失败时保留并明确标记最后已知快照，不用模拟值冒充实时数据。
+普通私聊始终开启。应用内 DING 和电话 DING 是两个独立追加通道，不会替代普通消息；电话通道仅在明确启用后生效。

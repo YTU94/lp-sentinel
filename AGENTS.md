@@ -2,9 +2,11 @@
 
 本文件是 `lp-sentinel` 的项目级协作契约。后续 Agent 在修改代码、补充能力或排查问题前，应先阅读本文件，并以当前代码为准；如果文档与实现不一致，应先修正文档或明确说明差异。
 
+当前主界面仅保留地址驱动的策略 Agent，桌面与移动端均无左侧模块菜单。独立 NFT 查询、导入监控、旧监控详情与钱包交易页面已移除；下文相关章节描述保留的后端兼容能力，不得恢复为界面入口。既有本地数据继续保留，Agent 内的仓位列表、分析和高级事件控制台照常使用。
+
 ## 1. 项目定位
 
-LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具。统一 NFT 查询首批覆盖 Robinhood Chain / Uniswap V3 与 BNB Chain / PancakeSwap V3，并保留 BNB Chain 钱包仓位与钱包确认交易能力。它负责读取链上仓位、计算持仓与手续费指标、判断价格是否接近/越过区间，并通过通知和钱包确认辅助用户处理流动性。
+LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具。统一 NFT 查询覆盖 Robinhood Chain / Uniswap V3、BNB Chain / PancakeSwap V3 与 Base / Uniswap V3，并保留 BNB Chain 钱包仓位与钱包确认交易能力。它负责读取链上仓位、计算持仓与手续费指标、判断价格是否接近/越过区间，并通过通知和钱包确认辅助用户处理流动性。
 
 当前产品原则：
 
@@ -12,7 +14,7 @@ LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具
 - 链上数据优先；链上快照不可用时不得伪装成实时数据或模拟价值。
 - 预警和 Action 状态机是策略预览与决策辅助，不会在后台自动签名或自动发起交易。
 - 钱包交易必须经过预检，并由用户在钱包中明确确认。
-- 用户添加的基础 LP 数据以浏览器 IndexedDB 为唯一持久化来源；服务端 JSON 只保存设置、通知状态和迁移前的兼容数据，不引入云端账户体系。
+- 本地 JSON 是当前唯一持久化存储，不引入数据库或云端账户体系。
 
 ## 2. 技术框架
 
@@ -23,7 +25,7 @@ LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具
 | 链交互 | `viem` | RPC 读取、合约调用、交易参数与链上格式化 |
 | 后端运行时 | Node.js + Express + TypeScript | REST API、监控轮询、静态资源服务 |
 | 外部行情 | Binance 公共现货接口 | 仅用于没有链上 `source` 的历史模拟仓位 |
-| 数据持久化 | 浏览器 IndexedDB + `server/store.ts` | IndexedDB 保存基础 LP；JSON 保存服务端设置与通知状态 |
+| 数据持久化 | `server/store.ts` 的异步 JSON Store | 保存仓位、快照、历史采样、设置 |
 | 测试 | Vitest + Supertest + jsdom | 领域单测、API 测试、React/浏览器行为测试 |
 | 开发编排 | `concurrently` + `tsx watch` | 前后端并行开发 |
 
@@ -44,13 +46,13 @@ npm run test:watch
 ### 3.1 NFT 查询、导入与管理
 
 - 统一 NFT 查询：`GET /api/lp-nft/:tokenId`，通过 `server/services/lp-nft-registry.ts` 并行探测已注册来源。
-- 首批来源为 `robinhood-uniswap-v3` 与 `bsc-pancake-v3`；增加网络或协议时必须新增适配器并注册，不得在路由或 UI 中堆叠特判。
+- 当前来源为 `robinhood-uniswap-v3`、`bsc-pancake-v3` 与 `base-uniswap-v3`；增加网络或协议时必须新增适配器并注册，不得在路由或 UI 中堆叠特判。
 - NFT 导入监控：`POST /api/positions/from-lp-nft`，请求体为 `{ tokenId, sourceId }`。
 - NFT ID 只在单个 Position Manager 内唯一。同编号可在不同网络/协议同时存在，统一查询必须保留全部命中，UI 必须显式展示网络、协议、交易对后让用户选择。
 - 查询结果可选择“采用智能值并加入预警”，把链上实时仓位转换为持久化 Position。
 - 顶部“添加 LP”入口和通用 `POST /api/positions` 已移除；不要恢复为第二套新增入口。
 - 已导入仓位只支持删除、暂停/恢复监控，以及通过专用接口调整上下预警线；不提供 LP 编辑按钮、编辑表单或通用字段更新接口。
-- 当前示例/验证 NFT 包括 Robinhood 的 `#984513`、`#994992`，以及 BNB Chain 的 `#7314935`；实际数据以 RPC 返回为准，不要把示例价格、区块或资产数量写死。
+- 当前示例/验证 NFT 包括 Robinhood 的 `#984513`、`#994992`，BNB Chain 的 `#7314935`，以及 Base 的 `#5949035`；实际数据以 RPC 返回为准，不要把示例价格、区块或资产数量写死。
 
 #### NFT 来源适配器契约
 
@@ -76,20 +78,31 @@ npm run test:watch
 - 默认 RPC：`https://rpc.mainnet.chain.robinhood.com`，可用 `ROBINHOOD_RPC_URL` 覆盖。
 - 默认客户端会合并同一轮并发 JSON-RPC 读取并对可重试错误退避重试，避免 5 秒轮询在公共节点上形成请求尖峰；不要移除该保护。
 - 读取 Position Manager、Pool、Token 合约，解析 owner、pool、token 地址、symbol、decimals、fee tier、tick spacing、tick 上下界、liquidity、当前 tick/价格、amount0/amount1、应计手续费、区块号和更新时间。
-- `server/services/robinhood-v3.ts` 负责链上读取和 Uniswap V3 fee-growth 计算；`s erver/domain/live-lp-import.ts` 负责映射为应用模型。
+- `server/services/robinhood-v3.ts` 负责链上读取和 Uniswap V3 fee-growth 计算；`server/domain/live-lp-import.ts` 负责映射为应用模型。
 - 详情页的“链上持仓”卡片必须展示真实 principal、未领取手续费、总价值（quote）以及 block/time 快照。
+- `server/services/position-lifecycle.ts` 通过 Position Manager 的 IncreaseLiquidity、DecreaseLiquidity、Collect 日志重建 NFT 生命周期；当前输出累计投入、移除、领取、已领取/未领取手续费、待领取移除本金、创建时间、仓位年龄、事件数和相关交易 gas，并按 reader 缓存 5 分钟。
+- `server/domain/live-lp-import.ts` 基于生命周期生成池子净损益、资金效率 ROI、历史费 APR、平均每日手续费和资金流。历史现金流必须按事件前最近一笔 Pool Swap 的 `sqrtPriceX96` 估值；若 100 万区块内无可用 Swap，应降级提示而不是回退到当前价伪造历史成本。
+- DecreaseLiquidity 产生的本金与手续费会共同进入 Position Manager 的 `tokensOwed`。必须按事件顺序先用 Collect 冲减待领取移除本金，再把余额归为手续费；不得把全部 `tokensOwed` 直接标成未领取手续费。
 - 链上读取失败时应展示错误/过期状态；不得用“模拟持有”“模拟价值”替代真实链上字段。
 
-### 3.3 BNB Chain / PancakeSwap V3 钱包能力
+### 3.3 Base / Uniswap V3 链上读取
+
+- 默认链 ID：`8453`；Position Manager 为 Uniswap 官方部署 `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1`，Factory 为 `0x33128a8fC17869897dcE68Ed026d694621f6FDfD`。
+- `server/services/base-v3.ts` 只负责 Base 网络配置与来源身份，复用 `server/services/robinhood-v3.ts` 中的通用 Uniswap V3 仓位、fee-growth 和价格计算。
+- 默认 RPC 为 `https://mainnet.base.org`，可用 `BASE_RPC_URL` 覆盖；实时仓位不依赖归档节点。
+- 历史生命周期和历史费 APR 需要支持完整 `eth_getLogs` 的 `BASE_HISTORY_RPC_URL`；未配置时必须保留实时资产与 1 小时增量 APR，并明确提示历史分析待回填。
+- NFT 与 Pool 链接使用 BaseScan；查询、导入和监控均为只读，不增加 Base 钱包交易能力。
+
+### 3.4 BNB Chain / PancakeSwap V3 钱包能力
 
 - 前端钱包连接和 BNB Chain 仓位展示位于 `src/wallet/pancake-v3.ts`。
 - 后端读取接口：`GET /api/wallet/:address/pancake-v3`。
 - 支持直接持有的 PancakeSwap V3 Position NFT；可选通过 `BSCSCAN_API_KEY` 做 token ID 发现。
-- BSC 默认优先使用 `https://bsc-rpc.publicnode.com`，失败时回退到 Binance 公共节点；可通过 `BSC_RPC_URL` 完全替换。
+- BSC RPC 可通过 `BSC_RPC_URL` 配置。
 - 移除流动性位于 `src/wallet/removal.ts`：构造 `decreaseLiquidity` 与 collect 交易、执行预检并请求钱包签名。
 - 当前实现是双币领取/收取路径，不等同于 Zap 单币退出；没有自动销毁空 NFT。任何 Zap、单币重建或自动复投都必须新增明确的合约路由、滑点、报价和用户确认设计。
 
-### 3.4 集中流动性与持仓计算
+### 3.5 集中流动性与持仓计算
 
 - `server/domain/lp-math.ts`：根据 sqrt price、tick、区间和 liquidity 计算集中流动性头寸的 token 数量与价值。
 - `server/domain/position.ts`：Position 的创建、字段校验和领域约束。
@@ -97,7 +110,7 @@ npm run test:watch
 - `src/token-selection.ts`：代币候选、搜索和格式化。
 - `src/price-freshness.ts`：行情时间新鲜度和过期状态判断。
 
-### 3.5 一小时手续费 APR
+### 3.6 一小时手续费 APR
 
 - `server/domain/fee-apr.ts` 根据连续链上快照计算过去一小时手续费 APR。
 - 快照历史字段包括 `blockNumber`、`updatedAt`、`currentPrice`、`principalValueQuote`、`feeAmount0`、`feeAmount1`。
@@ -106,15 +119,15 @@ npm run test:watch
 - 采样不足 1 分钟时 UI 显示“采样中”；不足 1 小时时显示覆盖分钟数；达到一小时后显示完整窗口 APR。
 - 监控重启时会用上一份快照补种基线，避免把重启造成的突变误算成收益。
 
-### 3.6 预警引擎与智能阈值
+### 3.7 预警引擎与智能阈值
 
 - `server/domain/smart-alerts.ts` 根据 LP 区间宽度和 tick 结构推荐预警阈值与设置。
 - `server/domain/alert-engine.ts` 判断下边界/上边界触达，并维护每一侧一次告警、回到安全区后重新布防的行为。
 - 具有已注册 `source.type` 的 NFT 仓位始终通过对应链上适配器刷新；仅历史模拟仓位使用 Binance 价格。
-- 全局预警设置包括轮询间隔、通知开关和 DWS 个人 DING 开关，走 `PATCH /api/settings`；单仓位上下阈值走 `PATCH /api/positions/:id/alerts`。
+- 全局预警设置包括轮询间隔、通知开关、DING 机器人配置等，走 `PATCH /api/settings`；单仓位上下阈值走 `PATCH /api/positions/:id/alerts`。
 - 预警本身不会直接移除或重建 LP；它只触发通知和 Action 状态变化。
 
-### 3.7 Action 状态机
+### 3.8 Action 状态机
 
 `src/action-state-machine.tsx` 将原 5 步压缩为 4 步，并用编号卡片、连接线和颜色突出当前阶段：
 
@@ -125,33 +138,28 @@ npm run test:watch
 
 `deriveActionStage` 的约束：无价格时回到 safe；价格越过 LP 区间时进入 execute；在区间内但越过预警线或尚未布防时进入 warning。状态机是展示层/策略层，不是交易执行器。
 
-### 3.8 通知
+### 3.9 通知
 
 - `server/services/dws-auth.ts` 读取 DWS 身份。
 - `server/services/dws-notifier.ts` 构造并发送通知命令。
-- 本地通知统一使用 `dws auth login` 建立的 OAuth 登录态；设置页只刷新状态和发送测试私聊，不读取或保存 Token。
-- 常规私信通知始终可用；应用内 DING 由 `dingEnabled` 控制，电话 DING 由 `dingCallEnabled` 控制，两者通过 `ding message send-personal` 使用当前用户身份且默认关闭，不再依赖 Robot Code。
-- 当前不支持短信通知。电话 DING 默认关闭，依赖有效的 DWS 登录态、当前身份的 `openDingTalkId` 及对应权限；不得把“可发送电话 DING”描述成后台自动执行 LP 交易。
-- Vercel 无法继承本机 DWS CLI 登录态，云端通知能力必须明确关闭，不得回退到 AppKey/AppSecret 或把登录凭据上传云端。
+- 常规私信通知始终可用；应用内 DING 由 `dingEnabled` 控制，电话 DING 由 `dingCallEnabled` 控制，两者共享 `dingRobotCode` 且默认关闭。
+- 当前不支持短信通知。电话 DING 已作为可选高优先级通道接入，但默认关闭，依赖有效的 `dingRobotCode`、DWS 登录态及对应开放平台权限；不得把“可发送电话 DING”描述成后台自动执行 LP 交易。
 
-### 3.9 本地状态与静态应用
+### 3.10 本地状态与静态应用
 
-- `src/indexeddb-position-store.ts` 保存 NFT 来源、Token ID、启停、预警线、布防状态和创建时间，不保存链上快照或历史采样。
-- `server/store.ts` 的 `JsonStore` 负责服务端内存状态、设置与通知状态；IndexedDB 模式下不会继续把仓位写入 JSON。
-- 默认数据文件为 `data/lp-sentinel.json`；升级时其中的旧仓位只作为一次性迁移源，浏览器确认 IndexedDB 写入成功后才清空 `positions`。
+- `server/store.ts` 的 `JsonStore` 负责异步加载、串行更新和保存。
+- 默认数据文件为 `data/lp-sentinel.json`；它是本地运行数据，不应手工改写来绕过领域校验。
 - `GET /api/state` 返回当前仓位、设置、通知配置和服务器时间。
-- `PUT /api/positions/sync` 用经过校验的 IndexedDB 基础记录恢复服务端运行时仓位；链上字段由对应适配器重新读取，不信任客户端提交的 owner、代币或价格。
 - `server/http/static-app.ts` 在生产模式下提供前端静态资源与 SPA fallback。
 
 ## 4. 分层架构与代码地图
 
 ```text
 src/
-├── App.tsx                 # 主壳、侧栏、详情、设置、NFT 查询、钱包入口
+├── App.tsx                 # 策略 Agent 主壳、刷新与报警设置
 ├── api.ts                  # 前端 REST 客户端；不得重新加入通用 createPosition
 ├── action-state-machine.tsx# 4 阶段 Action 展示与阶段推导
 ├── price-freshness.ts      # 行情新鲜度
-├── indexeddb-position-store.ts # 浏览器基础 LP 持久化
 ├── token-selection.ts      # token 搜索/选择
 ├── types.ts                # 前端共享模型
 ├── styles.css              # 浅色主题、响应式布局、状态颜色
@@ -162,7 +170,7 @@ src/
 server/
 ├── index.ts                # Express 应用与全部 API 路由
 ├── monitor.ts              # 轮询、刷新快照、APR、告警、通知
-├── store.ts                # 服务端内存状态、设置 JSON 与旧仓位迁移
+├── store.ts                # JSON 持久化
 ├── http/static-app.ts      # 静态资源与 SPA fallback
 ├── domain/
 │   ├── position.ts         # Position 校验与创建
@@ -175,7 +183,9 @@ server/
 │   └── wallet-position.ts  # 钱包 token ID 与金额处理
 └── services/
     ├── robinhood-v3.ts     # Robinhood V3 链上读取
+    ├── base-v3.ts          # Base Uniswap V3 网络配置与读取入口
     ├── pancake-v3.ts       # Pancake V3 NFT/钱包链上读取
+    ├── position-lifecycle.ts # Position Manager 历史事件与 gas 回放
     ├── lp-nft-registry.ts  # 多网络、多协议 NFT 适配器注册与并行识别
     ├── binance-price.ts    # Binance 行情
     ├── binance-symbol-search.ts
@@ -204,11 +214,10 @@ services → domain（仅做适配/读取，不把 UI 逻辑下沉到服务层�
   → GET /api/lp-nft/:tokenId
   → lp-nft-registry 并行调用已注册链/协议适配器
   → 唯一命中直接展示；多重命中按网络/协议/交易对选择
-  → robinhood-v3 或 pancake-v3 读取 Position Manager/Pool/Token
+  → robinhood-v3、base-v3 或 pancake-v3 读取 Position Manager/Pool/Token
   → live-lp-import 生成 Position + OnchainPositionSnapshot
   → POST /api/positions/from-lp-nft { tokenId, sourceId }
-  → 浏览器 IndexedDB 持久化基础 LP
-  → PUT /api/positions/sync 恢复服务端运行时仓位
+  → JsonStore 持久化
   → monitor 轮询刷新链上快照、APR 和 alert
   → GET /api/state
   → App 详情页展示
@@ -242,14 +251,11 @@ monitor 取得当前价格
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/api/state` | 读取应用状态 |
-| GET | `/api/notifications/auth` | 刷新本地 DWS CLI OAuth 登录状态 |
-| POST | `/api/notifications/test` | 向当前 DWS 登录用户发送测试私聊 |
 | GET | `/api/tokens/search` | 搜索代币 |
 | GET | `/api/wallet/:address/pancake-v3` | 读取 BNB 钱包 V3 仓位 |
 | GET | `/api/lp-nft/:tokenId` | 并行识别并返回所有已支持来源的 NFT 仓位 |
 | GET | `/api/lp/robinhood-uniswap-v3/:tokenId` | 查询 Robinhood NFT 实时链上数据 |
 | POST | `/api/positions/from-lp-nft` | 按 `{ tokenId, sourceId }` 新增指定来源监控仓位 |
-| PUT | `/api/positions/sync` | 用浏览器 IndexedDB 基础记录恢复运行时仓位 |
 | PATCH | `/api/positions/:id/enabled` | 仅通过 `{ enabled: boolean }` 暂停/恢复现有仓位 |
 | DELETE | `/api/positions/:id` | 删除现有监控仓位 |
 | PATCH | `/api/settings` | 更新监控、预警、通知设置 |
@@ -262,9 +268,12 @@ monitor 取得当前价格
 常用环境变量：
 
 - `ROBINHOOD_RPC_URL`：Robinhood Chain RPC。
+- `BASE_RPC_URL`：Base 实时只读 RPC。
+- `BASE_HISTORY_RPC_URL`：可选的 Base 归档 RPC，用于 Position Manager 全历史日志回放；未配置时 Base 实时快照仍可用，但详情页必须明确显示历史分析待回填。
 - `BSC_RPC_URL`：BNB Chain RPC。
+- `BSC_HISTORY_RPC_URL`：可选的 BNB 归档 RPC，用于 Position Manager 全历史日志回放；未配置时 BNB 实时快照仍可用，但详情页必须明确显示历史分析待回填。
 - `BSCSCAN_API_KEY`：可选的 BscScan token ID 发现。
-- DWS 认证由 CLI 自行管理，不通过 LP Sentinel 环境变量传入 Token、AppKey 或 AppSecret。
+- DWS 认证/通知相关环境变量：由 `dws-auth.ts` 和 `dws-notifier.ts` 实际读取为准。
 
 安全要求：
 
@@ -272,7 +281,7 @@ monitor 取得当前价格
 - RPC 读取、行情查询、链上快照默认是只读；任何交易必须显式由用户操作触发。
 - 不在测试中连接真实钱包或广播真实交易；移除流动性测试只验证交易参数、预检和失败分支。
 - 外部接口返回内容进入 UI 前应校验、格式化并标记更新时间/过期状态。
-- `data/lp-sentinel.json` 可能含设置、通知状态或尚未迁移的旧仓位，不要把它当作固定 fixture，也不要手改生产运行数据。
+- `data/lp-sentinel.json` 可能含本地运行状态，不要把它当作固定 fixture，也不要手改生产运行数据。
 
 ## 8. 修改规则
 
@@ -301,12 +310,25 @@ npm run build
 ## 10. 当前明确的非目标与限制
 
 - 没有后台自动移除、自动添加、自动 Zap、自动复投或自动签名。
-- 没有短信通知；电话 DING 仅在用户显式启用且当前 DWS 登录身份、`openDingTalkId` 与权限完整时可用。
-- 没有云端数据库、多用户权限、云端同步或跨设备账户；IndexedDB 数据仅属于当前浏览器来源与配置。
+- 没有短信通知；电话 DING 仅在用户显式启用且权限、Robot Code 完整时可用。
+- 没有数据库、多用户权限、云端同步或跨设备账户。
 - 没有完整的历史价格曲线、无常损失历史报表或农场奖励聚合。
+- 当前“池子净损益”是按事件区块附近池内成交价估算的链上现金流损益，不是逐时价格曲线回测，也不等同于 Revert 的完整 HODL 基准；标准 Position Manager 事件仍无法可靠区分外部入金与手续费复投。
 - PancakeSwap 目前覆盖直接持有的 V3 Position NFT；复杂托管、质押、Vault 或第三方管理仓位需单独适配。
 - 一小时 APR 依赖监控期间的连续快照；历史不足时只能显示采样中/覆盖时长，不能伪造完整年化值。
 
 ## 11. 交付说明
 
 当用户要求“实现”某项能力时，最终交付应说明：修改的文件、实际支持的能力、验证命令及结果、已知限制和是否需要用户在钱包中确认。对于只读分析或文档整理，不应顺带修改链上配置、凭据、项目外文件或广播交易。
+
+## 12. 事件驱动策略 Agent
+
+- `server/agent/` 实现快照变化检测、持久化任务、规则/模型工具分析、独立风控和成本模拟；`shared/agent.ts` 为前后端共享契约，`src/agent-panel.tsx` 为控制台。
+- 状态保存在现有 JSON 的可选 `agent` 字段，支持旧数据文件。`LP_SENTINEL_DATA_FILE` 可隔离演练环境。
+- Agent 不调用 DWS、不签名、不广播交易；模拟不修改原仓位。不要将模拟结果、参考价格区间或模型理由解释为实盘成交或收益。
+- 模型默认关闭；配置 AI Gateway 与模型标识后仍需在界面切换模式。工具只能读取行情、候选策略和近期决策，资金约束在服务端执行。
+- `priceReadFailed` 表示行情读取失败，区别于通知失败；新 Agent 的风控不可被 DWS 登录状态误阻断。
+- 业务逻辑遵循当前用户规则，不新增或扩写单元测试。通过已有测试、类型检查、构建与隔离运行验证；不得为此连接真实钱包或发送通知。
+- 详细行为、API 与限制见 `docs/strategy-agent.md`。
+- `server/research/` 是独立离线采集/校准/回放入口，运行 `npm run research -- ...`。不导入应用 Store，不启动监控，不修改实时 Agent 设置。历史数据和结果保存在被忽略的 `data/` 下。
+- `train` 只接受标明链上索引来源的完整数据；`verify` 仅接受明确标注的合成数据。禁止把合成结果、小时手续费近似或 9 天测试胜率作为实盘收益承诺；不得用测试集重新选参数。详见 `docs/lp-research.md`。

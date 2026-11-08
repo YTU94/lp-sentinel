@@ -1,13 +1,9 @@
-import express, { type Express } from 'express';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import express from "express";
+import path from "node:path";
 
-export function mountStaticApp(app: Express) {
-  const directory = resolve('dist');
-  if (!existsSync(directory)) return;
+export function createStaticApp(directory: string) {
+  const app = express();
   app.use(express.static(directory));
-  app.use((request, response, next) => {
-    if (request.method !== 'GET' || request.path.startsWith('/api/')) return next();
-    response.sendFile(resolve(directory, 'index.html'));
-  });
+  app.get("/{*splat}", (_request, response) => response.sendFile(path.join(directory, "index.html")));
+  return app;
 }

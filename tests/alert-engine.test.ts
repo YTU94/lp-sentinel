@@ -1,18 +1,24 @@
-import { describe, expect, it } from 'vitest';
-import { evaluateAlert } from '../server/domain/alert-engine.js';
+import { describe, expect, it } from "vitest";
+import { evaluateAlert } from "../server/domain/alert-engine.js";
 
-describe('evaluateAlert', () => {
-  it('alerts once on the same side and rearms inside the channel', () => {
-    const first = evaluateAlert(89, 90, 110, { armed: true, lastBoundary: null });
-    expect(first.event).toBe('lower');
-    expect(first.state.armed).toBe(false);
+describe("evaluateAlert", () => {
+  it("fires an upper alert once and stays silent while price remains breached", () => {
+    const first = evaluateAlert({ armed: true, zone: "safe" }, 2_950, 2_100, 2_900);
+    expect(first.event?.side).toBe("upper");
+    expect(first.state).toEqual({ armed: false, zone: "upper" });
 
-    const repeated = evaluateAlert(88, 90, 110, first.state);
+    const repeated = evaluateAlert(first.state, 3_020, 2_100, 2_900);
     expect(repeated.event).toBeNull();
+  });
 
-    const safe = evaluateAlert(100, 90, 110, repeated.state);
-    expect(safe.state).toEqual({ armed: true, lastBoundary: null });
+  it("rearams after returning to the safe zone", () => {
+    const restored = evaluateAlert({ armed: false, zone: "lower" }, 2_500, 2_100, 2_900);
+    expect(restored.event).toBeNull();
+    expect(restored.state).toEqual({ armed: true, zone: "safe" });
+  });
 
-    expect(evaluateAlert(111, 90, 110, safe.state).event).toBe('upper');
+  it("fires a lower alert at the exact configured threshold", () => {
+    const result = evaluateAlert({ armed: true, zone: "safe" }, 2_100, 2_100, 2_900);
+    expect(result.event?.side).toBe("lower");
   });
 });

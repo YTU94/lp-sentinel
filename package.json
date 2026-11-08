@@ -1,38 +1,39 @@
 {
   "name": "lp-sentinel",
-  "version": "0.3.0",
+  "description": "本地优先的集中流动性 LP 实时查询、模拟与智能预警工具",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n api,web -c green,cyan \"tsx watch server/index.ts\" \"vite\"",
+    "dev": "concurrently -k -n api,web -c magenta,cyan \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
+    "codex:bridge": "node scripts/start-local-codex.mjs",
+    "codex:install": "node scripts/install-local-codex.mjs",
+    "research": "node --import tsx server/research/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "express": "^5.1.0",
-    "lucide-react": "^0.468.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "viem": "^2.37.3"
+    "@vitejs/plugin-react": "latest",
+    "express": "latest",
+    "lucide-react": "latest",
+    "react": "latest",
+    "react-dom": "latest",
+    "viem": "^2.56.2",
+    "vite": "latest"
   },
   "devDependencies": {
-    "@testing-library/jest-dom": "^6.8.0",
-    "@testing-library/react": "^16.3.0",
-    "@types/express": "^5.0.3",
-    "@types/node": "^24.3.0",
-    "@types/react": "^19.1.12",
-    "@types/react-dom": "^19.1.9",
-    "@types/supertest": "^6.0.3",
-    "@vitejs/plugin-react": "^5.0.2",
-    "concurrently": "^9.2.1",
-    "fake-indexeddb": "^6.2.5",
-    "jsdom": "^26.1.0",
-    "supertest": "^7.1.4",
-    "tsx": "^4.20.5",
-    "typescript": "^5.9.2",
-    "vite": "^7.1.4",
-    "vitest": "^3.2.4"
+    "@types/express": "latest",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@types/supertest": "^7.2.1",
+    "concurrently": "latest",
+    "jsdom": "latest",
+    "supertest": "^7.2.2",
+    "tsx": "latest",
+    "typescript": "latest",
+    "vitest": "latest"
   }
 }

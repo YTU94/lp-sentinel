@@ -1,71 +1,72 @@
-const TICK_BASE = 1.0001;
-const UINT256_MOD = 2n ** 256n;
-const Q128 = 2n ** 128n;
+export type RangeStatus = "below" | "in-range" | "above";
 
-const subtractUint256 = (left: bigint, right: bigint) => (left - right + UINT256_MOD) % UINT256_MOD;
-
-export function priceFromTick(tick: number, decimals0: number, decimals1: number): number {
-  return TICK_BASE ** tick * 10 ** (decimals0 - decimals1);
+interface PositionInput {
+  capitalQuote: number;
+  currentPrice: number;
+  referencePrice: number;
+  lowerPrice: number;
+  upperPrice: number;
 }
 
-export function priceFromSqrtPriceX96(sqrtPriceX96: bigint, decimals0: number, decimals1: number): number {
-  const sqrtRatio = Number(sqrtPriceX96) / 2 ** 96;
-  return sqrtRatio ** 2 * 10 ** (decimals0 - decimals1);
+export interface SimulatedPosition {
+  baseAmount: number;
+  quoteAmount: number;
+  valueQuote: number;
+  status: RangeStatus;
+  progress: number;
 }
 
-export function amountsForLiquidityAtSqrtPrice(
-  liquidity: bigint,
-  tickLower: number,
-  tickUpper: number,
-  sqrtPriceX96: bigint,
-  decimals0: number,
-  decimals1: number,
-): { amount0: number; amount1: number } {
-  const sqrtLower = TICK_BASE ** (tickLower / 2);
-  const sqrtUpper = TICK_BASE ** (tickUpper / 2);
-  const sqrtCurrent = Number(sqrtPriceX96) / 2 ** 96;
-  const L = Number(liquidity);
-  let raw0 = 0;
-  let raw1 = 0;
-  if (sqrtCurrent <= sqrtLower) raw0 = L * (sqrtUpper - sqrtLower) / (sqrtLower * sqrtUpper);
-  else if (sqrtCurrent >= sqrtUpper) raw1 = L * (sqrtUpper - sqrtLower);
-  else {
-    raw0 = L * (sqrtUpper - sqrtCurrent) / (sqrtCurrent * sqrtUpper);
-    raw1 = L * (sqrtCurrent - sqrtLower);
+function assertPositive(value: number, label: string) {
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${label}必须大于 0`);
   }
-  return { amount0: raw0 / 10 ** decimals0, amount1: raw1 / 10 ** decimals1 };
 }
 
-export function amountsForLiquidity(
-  liquidity: bigint,
-  tickLower: number,
-  tickUpper: number,
-  currentTick: number,
-  decimals0: number,
-  decimals1: number,
-): { amount0: number; amount1: number } {
-  const sqrtPriceX96 = BigInt(Math.floor(TICK_BASE ** (currentTick / 2) * 2 ** 96));
-  return amountsForLiquidityAtSqrtPrice(liquidity, tickLower, tickUpper, sqrtPriceX96, decimals0, decimals1);
-}
+export function simulateConcentratedPosition(input: PositionInput): SimulatedPosition {
+  assertPositive(input.capitalQuote, "模拟投入");
+  assertPositive(input.currentPrice, "当前价格");
+  assertPositive(input.referencePrice, "建仓价格");
+  assertPositive(input.lowerPrice, "区间下限");
+  assertPositive(input.upperPrice, "区间上限");
 
-export function uncollectedFeeAmount(input: {
-  liquidity: bigint;
-  currentTick: number;
-  tickLower: number;
-  tickUpper: number;
-  feeGrowthGlobalX128: bigint;
-  feeGrowthOutsideLowerX128: bigint;
-  feeGrowthOutsideUpperX128: bigint;
-  feeGrowthInsideLastX128: bigint;
-  tokensOwed: bigint;
-}): bigint {
-  const below = input.currentTick >= input.tickLower
-    ? input.feeGrowthOutsideLowerX128
-    : subtractUint256(input.feeGrowthGlobalX128, input.feeGrowthOutsideLowerX128);
-  const above = input.currentTick < input.tickUpper
-    ? input.feeGrowthOutsideUpperX128
-    : subtractUint256(input.feeGrowthGlobalX128, input.feeGrowthOutsideUpperX128);
-  const inside = subtractUint256(subtractUint256(input.feeGrowthGlobalX128, below), above);
-  const delta = subtractUint256(inside, input.feeGrowthInsideLastX128);
-  return input.tokensOwed + input.liquidity * delta / Q128;
+  if (input.lowerPrice >= input.upperPrice) {
+    throw new Error("区间下限必须小于上限");
+  }
+
+  const sqrtLower = Math.sqrt(input.lowerPrice);
+  const sqrtUpper = Math.sqrt(input.upperPrice);
+  const boundedReference = Math.min(input.upperPrice, Math.max(input.lowerPrice, input.referencePrice));
+  const sqrtReference = Math.sqrt(boundedReference);
+
+  const referenceBasePerLiquidity = (sqrtUpper - sqrtReference) / (sqrtReference * sqrtUpper);
+  const referenceQuotePerLiquidity = sqrtReference - sqrtLower;
+  const liquidity = input.capitalQuote
+    / (referenceBasePerLiquidity * boundedReference + referenceQuotePerLiquidity);
+
+  let baseAmount: number;
+  let quoteAmount: number;
+  let status: RangeStatus;
+
+  if (input.currentPrice <= input.lowerPrice) {
+    status = "below";
+    baseAmount = liquidity * (sqrtUpper - sqrtLower) / (sqrtLower * sqrtUpper);
+    quoteAmount = 0;
+  } else if (input.currentPrice >= input.upperPrice) {
+    status = "above";
+    baseAmount = 0;
+    quoteAmount = liquidity * (sqrtUpper - sqrtLower);
+  } else {
+    status = "in-range";
+    const sqrtCurrent = Math.sqrt(input.currentPrice);
+    baseAmount = liquidity * (sqrtUpper - sqrtCurrent) / (sqrtCurrent * sqrtUpper);
+    quoteAmount = liquidity * (sqrtCurrent - sqrtLower);
+  }
+
+  return {
+    baseAmount,
+    quoteAmount,
+    valueQuote: baseAmount * input.currentPrice + quoteAmount,
+    status,
+    progress: Math.min(1, Math.max(0, (input.currentPrice - input.lowerPrice) / (input.upperPrice - input.lowerPrice))),
+  };
 }

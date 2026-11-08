@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
     "composite": true,
-    "target": "ES2022",
-    "lib": ["ES2022"],
+    "skipLibCheck": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "target": "ES2022",
     "strict": true,
-    "skipLibCheck": true,
     "esModuleInterop": true,
-    "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "rootDir": ".",
+    "outDir": ".tsbuild/node"
   },
-  "include": ["server", "api", "vite.config.ts", "vitest.config.ts"]
+  "include": ["api", "server", "shared", "vite.config.ts", "vitest.config.ts"]
 }

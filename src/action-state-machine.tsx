@@ -1,36 +1,85 @@
-import { Check, CircleAlert, MousePointerClick, TimerReset } from 'lucide-react';
-import type { ActionStatus } from './types';
+import { Activity, Clock3, Play, ShieldCheck } from "lucide-react";
+import type { Position } from "./types";
 
-export function deriveActionStage(input: {
-  currentPrice: number | null;
-  rangeLower: number;
-  rangeUpper: number;
-  alertLower: number;
-  alertUpper: number;
-  alertArmed: boolean;
-  coolingDown?: boolean;
-  stale?: boolean;
-}): ActionStatus {
-  if (input.stale) return 'stale';
-  if (input.coolingDown) return 'cooldown';
-  if (input.currentPrice == null) return 'safe';
-  if (input.currentPrice <= input.rangeLower || input.currentPrice >= input.rangeUpper) return 'execute';
-  if (!input.alertArmed || input.currentPrice <= input.alertLower || input.currentPrice >= input.alertUpper) return 'warning';
-  return 'safe';
+export type ActionStage = "safe" | "warning" | "execute" | "cooldown";
+
+export function deriveActionStage(position: Position): ActionStage {
+  const price = position.currentPrice;
+  if (price === undefined) return "safe";
+  if (price <= position.lowerPrice || price >= position.upperPrice || position.simulation?.status === "below" || position.simulation?.status === "above") {
+    return "execute";
+  }
+  if (price <= position.alertLower || price >= position.alertUpper || !position.alertState.armed) return "warning";
+  return "safe";
 }
 
-const steps = [
-  { id: 'safe', eyebrow: 'SAFE', title: '持续观察', detail: '价格位于安全航道', icon: Check },
-  { id: 'warning', eyebrow: 'WARNING', title: '进入预警', detail: '检查仓位与市场方向', icon: CircleAlert },
-  { id: 'execute', eyebrow: 'EXECUTE', title: '选择并确认', detail: '资产操作需钱包确认', icon: MousePointerClick },
-  { id: 'cooldown', eyebrow: 'COOLDOWN', title: '防止反复重建', detail: '等待策略冷却结束', icon: TimerReset },
+const stages = [
+  {
+    id: "safe",
+    label: "SAFE",
+    title: "持续观察",
+    description: "价格位于预警线之间，保持当前 LP。",
+    icon: ShieldCheck,
+  },
+  {
+    id: "warning",
+    label: "WARNING",
+    title: "进入预警",
+    description: "触及智能预警线，加速采样，暂不移除。",
+    icon: Activity,
+  },
+  {
+    id: "execute",
+    label: "EXECUTE",
+    title: "选择并确认",
+    description: "比较持有、双币移除或 Zap 后重建，确认净收益后执行。",
+    icon: Play,
+  },
+  {
+    id: "cooldown",
+    label: "COOLDOWN",
+    title: "防止反复重建",
+    description: "建议冷却 2–4 小时，紧急风险除外。",
+    icon: Clock3,
+  },
 ] as const;
 
-export function ActionStateMachine({ active }: { active: ActionStatus }) {
-  const activeIndex = steps.findIndex((item) => item.id === active);
-  return <><div className="action-flow" aria-label="Action 状态机">
-    {steps.map((step, index) => { const Icon = step.icon; return <div className={`action-step ${index === activeIndex ? 'active' : ''} ${index < activeIndex ? 'done' : ''}`} key={step.id}>
-      <div className="action-index"><Icon size={16} /></div><div><small>{step.eyebrow}</small><strong>{step.title}</strong><span>{step.detail}</span></div>
-    </div>; })}
-  </div>{active === 'stale' && <div className="stale-gate"><CircleAlert size={16} /> 链上快照已过期，暂停策略判断</div>}</>;
+const stageSummary: Record<ActionStage, string> = {
+  safe: "价格仍在安全航道，当前动作是保持仓位。",
+  warning: "价格已进入预警带，系统开始准备报价与候选方案。",
+  execute: "价格已越过 LP 边界，比较动作后等待钱包确认。",
+  cooldown: "刚完成一次调整，暂时抑制重复重建。",
+};
+
+export function ActionStateMachine({ position }: { position: Position }) {
+  const currentStage = deriveActionStage(position);
+
+  return <section className="action-machine" aria-labelledby={`action-machine-${position.id}`}>
+    <div className="action-machine-heading">
+      <div>
+        <h2 id={`action-machine-${position.id}`}>智能预警 Action</h2>
+        <p>{stageSummary[currentStage]}</p>
+      </div>
+      <span className={`action-current action-current-${currentStage}`}>当前阶段 · {stages.find((stage) => stage.id === currentStage)?.label}</span>
+    </div>
+    <ol className="action-flow" aria-label="智能预警 Action 状态流程">
+      {stages.map((stage, index) => {
+        const Icon = stage.icon;
+        const active = stage.id === currentStage;
+        return <li
+          className={`action-stage action-stage-${stage.id}${active ? " active" : ""}`}
+          data-stage={stage.id}
+          aria-current={active ? "step" : undefined}
+          key={stage.id}
+        >
+          <div className="action-stage-top"><span>{index + 1}</span><Icon size={18} aria-hidden="true" /></div>
+          <strong>{stage.label}</strong>
+          <b>{stage.title}</b>
+          <p>{stage.description}</p>
+          <small>{active ? "当前阶段" : index < stages.findIndex((item) => item.id === currentStage) ? "已通过" : "后续阶段"}</small>
+        </li>;
+      })}
+    </ol>
+    <div className="action-machine-note"><ShieldCheck size={15} aria-hidden="true" />策略预览，不会自动发起交易；真实资产操作仍需钱包确认。</div>
+  </section>;
 }

@@ -1,13 +1,46 @@
-import type { AlertBoundary, AlertState } from './types.js';
+export type AlertZone = "safe" | "lower" | "upper";
+
+export interface AlertState {
+  armed: boolean;
+  zone: AlertZone;
+}
+
+export interface AlertEvent {
+  side: "lower" | "upper";
+  threshold: number;
+  currentPrice: number;
+}
 
 export function evaluateAlert(
-  price: number,
-  lower: number,
-  upper: number,
-  state: AlertState,
-): { event: AlertBoundary | null; state: AlertState } {
-  const boundary: AlertBoundary | null = price <= lower ? 'lower' : price >= upper ? 'upper' : null;
-  if (!boundary) return { event: null, state: { armed: true, lastBoundary: null } };
-  if (!state.armed) return { event: null, state };
-  return { event: boundary, state: { armed: false, lastBoundary: boundary } };
+  previous: AlertState,
+  currentPrice: number,
+  lowerThreshold: number,
+  upperThreshold: number,
+): { state: AlertState; event: AlertEvent | null } {
+  if (lowerThreshold >= upperThreshold) {
+    throw new Error("下限预警值必须小于上限预警值");
+  }
+
+  const zone: AlertZone = currentPrice <= lowerThreshold
+    ? "lower"
+    : currentPrice >= upperThreshold
+      ? "upper"
+      : "safe";
+
+  if (zone === "safe") {
+    return { state: { armed: true, zone }, event: null };
+  }
+
+  if (!previous.armed) {
+    return { state: { armed: false, zone }, event: null };
+  }
+
+  return {
+    state: { armed: false, zone },
+    event: {
+      side: zone,
+      threshold: zone === "lower" ? lowerThreshold : upperThreshold,
+      currentPrice,
+    },
+  };
 }

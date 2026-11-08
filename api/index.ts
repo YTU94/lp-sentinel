@@ -1,18 +1,24 @@
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { createApp } from '../server/index.js';
-import { JsonStore } from '../server/store.js';
+import express from "express";
+import { portfolioRoutes } from "../server/agent/portfolio-routes.js";
 
-const store = new JsonStore(join(tmpdir(), 'lp-sentinel-vercel.json'), { positionStorage: 'indexeddb' });
-await store.load();
-await store.update((draft) => {
-  draft.settings.notificationEnabled = false;
-  draft.settings.dingEnabled = false;
-  draft.settings.dingCallEnabled = false;
-  draft.notification = { authenticated: false, error: 'DWS CLI 认证仅适用于本地运行，Vercel 无法继承本机登录态' };
+const app = express();
+app.disable("x-powered-by");
+app.use((_request, response, next) => { response.set("Cache-Control", "no-store"); next(); });
+app.use((request, response, next) => {
+  const allowedHosts = [process.env.VERCEL_URL, process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_BRANCH_URL].filter(Boolean);
+  const host = request.get("host");
+  if (!host || !allowedHosts.includes(host)) return response.status(403).json({ error: "请求主机无效" });
+  if (request.method !== "GET") {
+    try {
+      const origin = request.get("origin");
+      if (origin && new URL(origin).origin !== `https://${host}`) return response.status(403).json({ error: "不接受跨站分析操作" });
+    } catch { return response.status(403).json({ error: "请求来源无效" }); }
+    if (!request.is("application/json")) return response.status(415).json({ error: "请使用 JSON 请求" });
+  }
+  next();
 });
+app.use(express.json({ limit: "16kb" }));
+app.use("/api/agent", portfolioRoutes());
+app.use((_request, response) => response.status(404).json({ error: "此云端入口仅提供地址查仓、历史样本和按需分析" }));
 
-export default createApp({
-  store,
-  runtime: { mode: 'vercel', persistent: false, backgroundMonitoring: false, notifications: false, notificationProvider: 'none', positionStorage: 'indexeddb' },
-});
+export default app;
