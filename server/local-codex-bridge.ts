@@ -8,6 +8,7 @@ import { codexLastFailureAt, inspectCodexCli, runCodexJson, stopCodexCalls } fro
 import { portfolioRoutes } from "./agent/portfolio-routes.js";
 
 process.env.LP_PORTFOLIO_AI_PROVIDER = "codex";
+process.env.LP_AGENT_FORCE_CODEX = "1";
 const script = fileURLToPath(import.meta.url);
 const pidPath = resolve(dirname(script), "../data/local-codex.pid");
 const origins = new Set(["https://lp-sentinel.vercel.app", "http://127.0.0.1:1422", "http://localhost:1422"]);
@@ -22,7 +23,8 @@ async function checkInstallation() {
   state = { ...state, cliVersion: cli.cliVersion, checkedAt: new Date().toISOString() };
   if (!cli.installed) state = { ...state, phase: "missing-cli", message: "未找到 Codex CLI，请在本机安装后点击修复" };
   else if (!cli.authenticated) state = { ...state, phase: "needs-login", message: "请在本机完成 codex login，然后点击修复" };
-  return cli.installed && cli.authenticated;
+  else if (!cli.compatible) state = { ...state, phase: "error", message: "本机 Codex 版本缺少安全隔离能力，请完成更新后修复" };
+  return cli.installed && cli.authenticated && cli.compatible;
 }
 
 function repair() {

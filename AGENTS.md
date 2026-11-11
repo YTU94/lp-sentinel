@@ -2,8 +2,6 @@
 
 本文件是 `lp-sentinel` 的项目级协作契约。后续 Agent 在修改代码、补充能力或排查问题前，应先阅读本文件，并以当前代码为准；如果文档与实现不一致，应先修正文档或明确说明差异。
 
-当前主界面仅保留地址驱动的策略 Agent，桌面与移动端均无左侧模块菜单。独立 NFT 查询、导入监控、旧监控详情与钱包交易页面已移除；下文相关章节描述保留的后端兼容能力，不得恢复为界面入口。既有本地数据继续保留，Agent 内的仓位列表、分析和高级事件控制台照常使用。
-
 ## 1. 项目定位
 
 LP Sentinel 是一个本地优先的集中流动性（LP）监控与预警工具。统一 NFT 查询覆盖 Robinhood Chain / Uniswap V3、BNB Chain / PancakeSwap V3 与 Base / Uniswap V3，并保留 BNB Chain 钱包仓位与钱包确认交易能力。它负责读取链上仓位、计算持仓与手续费指标、判断价格是否接近/越过区间，并通过通知和钱包确认辅助用户处理流动性。
@@ -156,7 +154,7 @@ npm run test:watch
 
 ```text
 src/
-├── App.tsx                 # 策略 Agent 主壳、刷新与报警设置
+├── App.tsx                 # 主壳、侧栏、详情、设置、NFT 查询、钱包入口
 ├── api.ts                  # 前端 REST 客户端；不得重新加入通用 createPosition
 ├── action-state-machine.tsx# 4 阶段 Action 展示与阶段推导
 ├── price-freshness.ts      # 行情新鲜度

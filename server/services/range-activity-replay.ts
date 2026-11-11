@@ -12,7 +12,7 @@ const poolEvents = parseAbi([
 const poolAbi = parseAbi(["function slot0() view returns (uint160 sqrtPriceX96,int24 tick)", "function factory() view returns (address)"]);
 const v3FactoryAbi = parseAbi(["function getPool(address,address,uint24) view returns (address)"]);
 const clFactoryAbi = parseAbi(["function getPool(address,address,int24) view returns (address)"]);
-const rpcDefaults: Record<number, [string, string]> = {
+export const rpcDefaults: Record<number, [string, string]> = {
   1: ["ETHEREUM", "https://ethereum-rpc.publicnode.com"],
   10: ["OPTIMISM", "https://optimism-rpc.publicnode.com"],
   56: ["BSC", "https://bsc-rpc.publicnode.com"],

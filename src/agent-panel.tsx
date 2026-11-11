@@ -9,7 +9,7 @@ const statuses = { observing: "持续观察", ready: "待模拟", blocked: "风�
 const actions = { hold: "继续观察", recenter: "重新居中", reduce: "移除流动性" };
 const eventNames = { "position.observed": "首次观察", "range.changed": "区间状态变化", "price.moved": "价格变动 ≥ 1%", "data.unavailable": "数据不可用", "review.requested": "手动评估", "demo.requested": "合成行情演练" };
 const eventStatuses = { pending: "排队中", processing: "分析中", completed: "已完成", failed: "失败" };
-const steps: Record<string, string> = { "event.received": "感知事件", "tool.called": "读取工具", "plan.proposed": "提出建议", "risk.checked": "风控校验", "paper.executed": "模拟执行", "memory.updated": "复盘入库", "session.recovered": "恢复任务" };
+const steps: Record<string, string> = { "event.received": "感知事件", "tool.called": "读取工具", "context.prepared": "准备只读数据", "plan.proposed": "提出建议", "risk.checked": "风控校验", "paper.executed": "模拟执行", "memory.updated": "复盘入库", "session.recovered": "恢复任务" };
 const number = (value: number) => new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 6 }).format(value);
 const time = (value: string) => new Date(value).toLocaleString("zh-CN", { hour12: false });
 
@@ -67,7 +67,7 @@ export function AgentPanel({ positions }: { positions: Position[] }) {
       {["感知事件", "分析策略", "独立风控", "模拟执行", "复盘记忆"].map((label, index) => <span key={label}>{index > 0 && <ArrowRight size={14} aria-hidden="true" />}{label}</span>)}
     </div>
     <div className="agent-toolbar">
-      <div><strong>{view?.policy.planner === "model" ? "模型工具模式" : "规则模式"}</strong><span> · {view?.policy.enabled ? view.processing ? "正在分析" : "等待事件" : "已暂停"} · 仅模拟资金操作</span></div>
+      <div><strong>{view?.policy.planner === "model" ? "模型模式" : "规则模式"}</strong><span> · {view?.policy.enabled ? view.processing ? "正在分析" : "等待事件" : "已暂停"} · 仅模拟资金操作</span></div>
       <button className="wallet-button" disabled={busy || !view} onClick={() => void run(() => api.agentPolicy({ enabled: !view!.policy.enabled }))}>{view?.policy.enabled ? <Pause size={15} /> : <Play size={15} />}{view?.policy.enabled ? "暂停 Agent" : "恢复 Agent"}</button>
     </div>
     {(error || loadError || view?.error) && <div className="agent-error" role="alert"><CircleAlert size={17} /><span>{error || loadError || view?.error}</span></div>}
@@ -110,7 +110,7 @@ export function AgentPanel({ positions }: { positions: Position[] }) {
     {view && <details className="agent-settings"><summary>策略设置与执行边界</summary><form key={JSON.stringify(view.policy)} onSubmit={event => {
       event.preventDefault(); const data = new FormData(event.currentTarget);
       void run(() => api.agentPolicy({ planner: data.get("planner") as "rules" | "model", cooldownSeconds: Number(data.get("cooldown")) * 60, maxCostBps: Number(data.get("cost")), maxPriceDriftBps: Number(data.get("drift")) }));
-    }}><div className="agent-policy-inputs"><label>分析方式<select name="planner" defaultValue={view.policy.planner}><option value="rules">规则模式</option><option value="model" disabled={!view.modelConfigured}>模型工具模式{view.modelConfigured ? "" : "（未配置）"}</option></select></label><label>冷却时间（分钟）<input name="cooldown" type="number" min="1" max="1440" step="1" required defaultValue={view.policy.cooldownSeconds / 60} /></label><label>成本上限（bps）<input name="cost" type="number" min="1" max="500" required defaultValue={view.policy.maxCostBps} /></label><label>价格偏移上限（bps）<input name="drift" type="number" min="1" max="1000" required defaultValue={view.policy.maxPriceDriftBps} /></label></div><p>模型模式会将行情、策略选项和近期决策发送给配置的模型服务，不发送钱包地址或凭据。规则模式在本地分析。</p><p>所有资金操作仅作成本演练，不签名、不广播、不改变原有 LP。参考区间尚未对齐 tick，也不包含成交保证。</p><button className="wallet-button" disabled={busy}>保存策略设置</button></form></details>}
+    }}><div className="agent-policy-inputs"><label>分析方式<select name="planner" defaultValue={view.policy.planner}><option value="rules">规则模式</option><option value="model" disabled={!view.modelConfigured}>模型模式{view.modelConfigured ? "" : "（未配置）"}</option></select></label><label>冷却时间（分钟）<input name="cooldown" type="number" min="1" max="1440" step="1" required defaultValue={view.policy.cooldownSeconds / 60} /></label><label>成本上限（bps）<input name="cost" type="number" min="1" max="500" required defaultValue={view.policy.maxCostBps} /></label><label>价格偏移上限（bps）<input name="drift" type="number" min="1" max="1000" required defaultValue={view.policy.maxPriceDriftBps} /></label></div><p>模型模式会将行情、策略选项和近期决策发送给配置的模型服务，不发送钱包地址或凭据。规则模式在本地分析。</p><p>所有资金操作仅作成本演练，不签名、不广播、不改变原有 LP。参考区间尚未对齐 tick，也不包含成交保证。</p><button className="wallet-button" disabled={busy}>保存策略设置</button></form></details>}
   </div>;
 }
 

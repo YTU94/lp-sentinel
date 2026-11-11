@@ -1,4 +1,6 @@
 import { Router } from "express";
+import { modelConfig, type ActiveModel } from "./model-config.js";
+import { modelStatus } from "./model-service.js";
 import { readUniswapPoolUniverse } from "../services/uniswap-pool-universe.js";
 import { portfolioSources } from "../../shared/portfolio.js";
 import { portfolioSource, readPortfolioRangeActivity, readWalletPortfolioPage, refreshPortfolioPosition, walletAddress } from "../services/wallet-portfolio.js";
@@ -8,7 +10,10 @@ export function portfolioRoutes() {
   const router = Router();
   const pending = new Map<string, ReturnType<typeof analyze>>();
   router.get("/sources", (_request, response) => response.json(portfolioSources));
-  router.get("/ai-status", async (request, response) => response.json(await portfolioAiStatus(request.get("x-vercel-oidc-token"))));
+  router.get("/ai-status", async (request, response) => {
+    try { response.json(await portfolioAiStatus(request.get("x-vercel-oidc-token"))); }
+    catch { response.status(503).json({ error: "模型配置无法读取，请检查服务端配置文件" }); }
+  });
   router.get("/range-activity", async (request, response) => {
     try {
       if (request.query.refresh !== undefined && request.query.refresh !== "1") return response.status(400).json({ error: "历史刷新参数无效" });
@@ -42,10 +47,10 @@ export function portfolioRoutes() {
       response.status(502).json({ error: message.startsWith("Revert") ? message : "Revert 查仓未完成，请稍后重试此来源。" });
     }
   });
-  async function analyze(address: string, sourceId: string, key: string, gatewayToken?: string) {
-    const status = await portfolioAiStatus(gatewayToken);
+  async function analyze(address: string, sourceId: string, key: string, active: ActiveModel, gatewayToken?: string) {
+    const status = await modelStatus(gatewayToken, active);
     if (!status.available) throw new Error(status.label);
-    return analyzePortfolioPosition(await refreshPortfolioPosition(address, sourceId, key), gatewayToken);
+    return analyzePortfolioPosition(await refreshPortfolioPosition(address, sourceId, key), gatewayToken, active);
   }
   router.post("/analyze", async (request, response) => {
     let address: string, sourceId: string, key: string;
@@ -56,11 +61,14 @@ export function portfolioRoutes() {
       key = request.body.positionKey;
       if (typeof key !== "string" || key.length > 240) throw new Error("仓位标识无效");
     } catch (error) { return response.status(400).json({ error: (error as Error).message }); }
-    const id = `${address.toLowerCase()}:${key}`;
+    let active: ActiveModel;
+    try { active = await modelConfig.active(); }
+    catch { return response.status(503).json({ error: "模型配置无法读取，请检查服务端配置文件" }); }
+    const id = `${address.toLowerCase()}:${key}:${modelConfig.revision}`;
     if (!pending.has(id) && pending.size >= 2) return response.status(429).json({ error: "已有分析正在进行，请稍后重试" });
     try {
       let task = pending.get(id);
-      if (!task) { task = analyze(address, sourceId, key, request.get("x-vercel-oidc-token")); pending.set(id, task); }
+      if (!task) { task = analyze(address, sourceId, key, active, request.get("x-vercel-oidc-token")); pending.set(id, task); }
       response.json(await task);
     } catch (error) {
       const message = error instanceof Error ? error.message : "分析失败，请重新查询后重试";

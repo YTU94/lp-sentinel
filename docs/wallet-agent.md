@@ -2,17 +2,42 @@
 
 策略 Agent 是当前唯一主界面。左侧模块菜单与独立 NFT 查询、监控详情、钱包交易页面已移除，主工作区使用完整可用宽度。Agent 内的仓位选择、每日有效区间与 APR、AI 建议和高级事件控制台继续保留，既有本地记录与后端兼容接口不受页面移除影响。
 
-输入 EVM 钱包地址，通过 Revert Finance 地址索引发现 LP，选中仓位后在右侧查看资产与收益。页面可连接同一台电脑的本机 Codex API，点击“获取 AI 优化建议”后补充个人历史与 Uniswap TVL Top 50 基准，再交给 Codex。Vercel 提供数据 API，AI Gateway 接入待开通。高级事件控制台位于本地页面底部。
+输入 EVM 钱包地址，通过 Revert Finance 地址索引发现 LP，选中仓位后在右侧查看资产与收益。点击“获取 AI 优化建议”会补充个人历史与 Uniswap TVL Top 50 基准，再交给本机配置的模型。本地页面可另行开启出区间自动提醒。Vercel 提供数据 API，线上不提供 AI 优化。高级事件控制台位于本地页面底部。
+
+仓位详情可切换交易对的计价币。反向价格取倒数，区间显示为原上限和下限倒数的升序，本金按当前池价换算；缺少有效价格时显示“—”。AI 分析使用数据源的原始报价方向，切换后页面会标明该方向。
+
+每个集中流动性仓位的列表项显示价格区间条和池价标记：海绿表示区间内，红色表示区间外，切换计价方向时选中仓位的指示图同步反向。该图仅为区间位置示意，价格远超图示范围时标记停在边缘并提示；价格或区间不可用时不绘制。快照超过 3 分钟、数据源标记过期或快照时间无效时显示灰色和“已过期”，空仓与普通池不显示区间图。图形使用已有仓位快照，不额外请求行情。
+
+策略建议区分个人逐日收益、现金流、仓位快照与池级参考；服务端会标明未取得的数据，缺失不视为零。出区间时提示交易手续费和单币敞口风险。成本比较以相同假设期限内相对继续持有的预计增量为基准，另扣未来操作成本并披露价格路径风险；当前没有接入未来交易报价或可靠的增量收益预测，因此不计算回本金额或断言调仓划算。历史手续费与已付 Gas 不作为未来报价。
 
 ## 本地运行与地址保存
 
 ```sh
 npm run dev
 codex login status
-npm run codex:bridge
 ```
 
-打开 `http://127.0.0.1:1422/`。本机 API 复用 Codex 登录态，可用 `codex login` 登录，首次安装启动器见下文。有效地址在主动查询时写入当前浏览器、当前 origin 的 IndexedDB，数据库为 `lp-sentinel`，对象仓库为 `preferences`，键为 `wallet-address`。重开页面恢复输入，用户点击后开始查询。清除操作删除地址及当前结果，存储错误会在页面提示。
+打开 `http://127.0.0.1:1422/`，从右上角「Agent 菜单」分别进入「模型与运行」「Agent 测评」或「样本数据」。本机 Codex 可用 `codex login` 登录。页面间切换保留当前地址查询结果和未保存的模型草稿；刷新或关闭页面后未保存的草稿不会保留。云端数据版菜单仅提供历史样本，模型设置和测评仍在本地版使用。页面每 10 秒检查本地服务，服务在线不代表数据源或通知正常。有效地址在主动查询时写入当前浏览器、当前 origin 的 IndexedDB，数据库为 `lp-sentinel`，对象仓库为 `preferences`，键为 `wallet-address`。重开页面恢复输入，用户点击后开始查询。清除操作删除地址及当前结果，存储错误会在页面提示。
+
+## Agent 一键测评
+
+本地「Agent 测评」页面的「Agent 一键测评」按策略指令、输出 schema 和当前风控参数选择场景，并显示包含策略核心实现的定义指纹。场景包括集中仓位、历史缺口、Top 50 池级基准、有效区间、普通池、空仓、质押、股票代币、指令注入，以及事件、行情失效、冷却、成本和价格偏移。策略建议调用实际的本机 Codex 分析入口；事件场景在临时 JSON 中运行独立的真实 `StrategyAgent`，按当前风控阈值使用规则模式。地址提醒另外演练五分钟连续采样、回区间与采样中断重计时，并使用合成 Swap RPC 运行真实链上回放逻辑。
+
+模型评审使用 [LangChain OpenEvals](https://github.com/langchain-ai/openevals) 和本机 Codex，事件与风控使用 OpenEvals 的确定性匹配。新增跌破下界的单币仓位和质押仓位场景，检查保守、激进方案与出区间手续费、成本和解质押约束。结果按输出契约、事实依据、风险识别、建议可执行性、指令边界、事件响应和风控拦截分项展示；模型调用或评审失败的项目标记为未评分，不按零分计算。雷达图旁显示每项的已评分数量，展开场景可查看合成输入对应的实际输出、评分理由和 Agent 改进建议。
+
+测评只使用合成数据，不读取真实钱包、不发钉钉、不签名或广播交易；模型输入仍会发送给 Codex 模型服务并消耗正常额度。模型评审与被测建议使用同一提供方，可能存在同源偏差。分数不代表真实收益、行业排名或对未来表现的保证；需以人工核验样本和独立评审补充验证。最新报告保存在现有本地 JSON，服务重启时未完成的测评标记为中断。Vercel 数据版不运行该测评。
+
+## 自动出区间提醒
+
+查询地址后可在本地页面开启提醒，停止或切换地址均在同一位置操作。启用后，所选地址和精简的事件状态保存在现有本地 JSON 中；服务重启后恢复监控，但中断超过 90 秒的观察重新计时。清除本机地址会先停止并删除该提醒状态。
+
+各 Revert 来源约每 30 秒独立刷新所有活跃仓位；无效、过期、不完整或中断的数据不会计入确认。连续观察至少 5 分钟后，读取该池最近 5 分钟的链上 Swap 事件并核对起止 tick、池代币及区块；若中途回到区间，重新观察。链上读取失败时等待重试，不发送已确认提醒。重组、RPC 覆盖或限流可能延迟确认。
+
+确认后自动调用配置的 AI 服务（默认本机 Codex）生成建议；如历史数据不可用，标明仅依据当前快照。发送前再次检查最新仓位及链上 5 分钟，随后通过 DWS 向当前登录用户发送钉钉私信，包含仓位、价格、策略、依据、下一步及风险。同一轮出区间不会重复提醒，观察到重新回到区间后才重新布防。钉钉使用 `dws auth login` 登录，收件人以当前组织和用户 ID 核验；异步投递需查询结果，未知状态不显示为送达。模型、RPC 或登录不可用时页面显示原因并等待重试；若发送结果未知且没有任务 ID，则提示人工核对，不自动重发。
+
+此循环运行在常驻服务，关闭浏览器后继续；服务或所在主机停止后不工作。Vercel 数据页不提供后台提醒。它只读链上数据，不签名或提交交易。
+
+独立 Linux 后台入口已准备为 `npm run watch:worker`，但尚未部署。它要求 `flock`、独占且已启用监控的持久化 JSON 文件（绝对路径由 `LP_SENTINEL_DATA_FILE` 指定）与当前用户的 DWS 登录。线上后台只发送已确认出区间的状态、价格和区间，不调用 AI；本地手动与自动建议保持不变。入口会阻止多个后台进程同时使用同一文件。迁移时需要保留已发送状态并停止原监控，避免两端重复提醒；DWS 在目标环境单独授权，其配置和密钥存储也需要受保护的持久磁盘，不要提交或复制到仓库。Vercel Daemon 的本地文件是临时的，因此入口在该环境中会拒绝启动，直至接入可靠的云端持久化存储。
 
 ## Revert 数据接入
 
@@ -40,6 +65,12 @@ GET https://api.revert.finance/v1/positions/{network}/{exchange}/account/{addres
 
 当前范围为表中来源的活跃集中流动性仓位。Revert 的索引覆盖、历史数据完整度和接口可用性决定结果范围。接口来自网站公开读请求，其字段变化需要同步适配。源代码与指标定义可在 Revert 官方站点核对。[Revert](https://revert.finance/)、[绩效口径](https://docs.revert.finance/revert/position-analytics/how-revert-measures-performance)、[Aerodrome](https://docs.revert.finance/revert/aerodrome)
 
+## 每日样本概览
+
+本地「样本数据」优先使用首页最近一次成功查询的钱包：一次查询至少有一个来源完整返回且未标记异常时，地址写入本机样本设置；失败或中途停止不会替换原地址。每天北京时间 08:10（UTC 00:10）更新，也可在页面手动触发。服务停机期间不运行；重启后若已错过时间立即补采。来源异常、历史不可用或 Top 50 有池未采到时，1 小时后重试。清除首页地址会同时清除采样钱包及其样本，不会启用地址提醒或发送通知。
+
+采样检查 Revert 支持的五个 Uniswap V3 网络，排除空仓，并为每个钱包 LP 读取近 30 日仓位快照、价格、手续费日样本与池 TVL、交易量及池手续费。有效区间优先使用 Revert 快照，必要时尝试链上事件补缺；上游窗口包含采集当天，因此概览最多统计 29 个完整北京时间日，并区分实际覆盖、未知时段与快照估算，池手续费不等于个人收益。钱包来源未完成、没有可用仓位或历史不可用时，回退到下述 TVL Top 50；临时异常时保留上次钱包样本并标记过期。样本只保留最近一次滚动窗口，使用独立的本地 JSON 文件 `<LP_SENTINEL_DATA_FILE>.samples.json`，不会写入模型配置或云端。自动更新仅在本地服务运行时生效；线上数据版只提供 Top 50 查询。
+
 ## Uniswap TVL Top 50 历史数据池
 
 `server/services/uniswap-pool-universe.ts` 从 `https://yields.llama.fi/pools` 读取 DeFiLlama 收录的 Uniswap V2、V3、V4，按美元 TVL 跨链排序并固定前 50 个池。池身份使用数据源 UUID，保留网络、协议、费率标签和两个底层代币合约。
@@ -52,7 +83,9 @@ GET https://api.revert.finance/v1/positions/{network}/{exchange}/account/{addres
 
 ## 本机 Codex API 与启动器
 
-页面标题右侧显示本机 Codex 状态与“修复”按钮，每 10 秒读取 `http://127.0.0.1:4318/api/local/status`。ready 要求 API 在线、CLI 可执行、已登录且最小 JSON 调用验证成功。心跳只读取状态，CLI 登录状态每 30 秒复查。启动和显式修复执行一次最小模型调用，近期成功结果用于合并重复修复请求。实际分析由“获取 AI 优化建议”按钮触发，优先使用 ready 的本机入口。
+本地构建通过同源 `/api/agent/ai-status` 检测后端，通过 `/api/agent/analyze` 执行用户点击的分析；启用自动提醒后，已确认的事件也会调用本地分析。状态检测只读取 CLI 安装与登录情况，后台心跳保留分析失败的提示，手动检测可清除提示并重试。选择提供方与发送分析请求使用同一通道。
+
+云端构建 `VITE_LP_RUNTIME=cloud` 通过独立的本机桥接 API 连接这台电脑。页面标题右侧显示本机 Codex 状态与“修复”按钮，每 10 秒读取 `http://127.0.0.1:4318/api/local/status`。ready 要求 API 在线、CLI 可执行、已登录且最小 JSON 调用验证成功。心跳只读取状态，CLI 登录状态每 30 秒复查。启动和显式修复执行一次最小模型调用，近期成功结果用于合并重复修复请求。实际分析由“获取 AI 优化建议”按钮触发。
 
 在本机项目目录执行以下命令。
 
@@ -112,7 +145,7 @@ macOS 启动器位于 `~/Applications/LP Sentinel Codex.app`，注册 `lp-sentin
 
 ## AI 数据流
 
-浏览器提交地址、来源和仓位键。后端要求该键在最近 15 分钟内被本机查询过，刷新对应 Revert 页并重新核对归属。给模型的事实包含网络、交易对、数量、区间、质押状态、绩效基准、历史样本与现金流摘要。地址发给 Revert，模型收到脱敏摘要。
+浏览器提交地址、来源和仓位键。后端刷新对应 Revert 仓位并重新核对归属。给模型的事实包含网络、交易对、数量、区间、质押状态、绩效基准、历史样本与现金流摘要。地址发给 Revert，模型收到脱敏摘要。
 
 Codex 在独立临时目录中以 `--ephemeral`、只读沙箱和结构化输出运行，工具权限受限，结束后清理临时文件。模型服务返回方向、依据、风险与下一步。单次最多 90 秒，最多两条不同仓位并发，同仓位在途调用复用。界面使用结果中的快照更新事实。模型连接或格式错误显示可重试状态。
 
@@ -136,30 +169,38 @@ Codex 在独立临时目录中以 `--ephemeral`、只读沙箱和结构化输出
 | --- | --- | --- |
 | GET | `/api/agent/sources` | 网络和平台目录 |
 | GET | `/api/agent/ai-status` | 提供方及可用性 |
+| GET | `/api/agent/runtime` | 本地服务与监控运行状态 |
+| GET / PUT | `/api/agent/model-settings` | 本地模型配置；读取不返回密钥 |
+| POST | `/api/agent/model-settings/test` | 显式发送合成连接测试，可能产生费用 |
+| GET / POST | `/api/agent/portfolio-watch` | 本地提醒状态、开启、停止或清除 |
+| GET / POST | `/api/agent/evaluation` | 读取最新报告或启动一次本机合成场景测评 |
 | GET | `/api/agent/wallet/:address?sourceId=...&cursor=...` | Revert 单来源分页、进度与提示 |
 | POST | `/api/agent/analyze` | `{ address, sourceId, positionKey }`，刷新后分析 |
 | GET | `/api/agent/pool-universe` | Uniswap TVL 前 50 池、30 日观测与覆盖摘要 |
+| GET | `/api/agent/samples` | 本机每日样本状态与最近结果 |
+| PUT | `/api/agent/samples/wallet` | 保存或清除本机采样钱包 |
+| POST | `/api/agent/samples/refresh` | 立即开始本机样本更新 |
 | GET | `/api/agent/range-activity` | `address / sourceId / positionKey`，可选 `refresh=1`，返回每日有效区间、回放覆盖与紧凑时段 |
 
 写请求经过本机 Host、JSON 和 Origin 校验。开发代理保留 Host。无效地址、来源和游标返回 400，数据源错误返回 502。RPC 环境变量服务于 NFT 监控和钱包合约读取，地址查仓使用固定的 Revert HTTPS 服务。
 
-AI 默认 `LP_PORTFOLIO_AI_PROVIDER=codex`。选用 `gateway` 时配置 `LP_AGENT_MODEL`，认证可使用 `AI_GATEWAY_API_KEY`、本地开发的 `VERCEL_OIDC_TOKEN` 或 Vercel Functions 请求上下文的 `x-vercel-oidc-token`。运行时令牌按请求传递。普通 `npm run dev` 从 shell 获取环境变量。
+「模型与运行」可选择 Codex、DeepSeek、GLM 或自定义 OpenAI 兼容接口，编辑模型名与接口地址，保存后点击测试。Codex 使用现有登录态；其他服务优先使用页面保存的密钥，也可使用 `DEEPSEEK_API_KEY`、`ZHIPU_API_KEY`（或 `ZAI_API_KEY`）、`LP_COMPATIBLE_API_KEY` 环境变量。自定义接口仅允许 HTTPS 或本机 HTTP。配置保存在服务端数据目录的 `agent-models.json`，密钥为明文、权限 0600，不返回浏览器；请保护服务主机和备份，使用 `LP_AGENT_MODEL_CONFIG_FILE` 自定义文件名时放在仓库外或确保忽略。可选单价用于成功调用的粗略费用估算，最近 100 次持久保存；失败、订阅和测评用量不包含，账单以服务商为准。
+
+远程模型通过 AI SDK 的 OpenAI 兼容协议请求结构化 JSON；模型、服务端能力与额度由用户自行配置。保存配置不会自动测试，连接测试会消耗正常额度。历史 Gateway 环境配置仍可读取，但 Vercel 默认 `LP_PORTFOLIO_AI_PROVIDER=disabled`，本功能不启用线上 AI。单个 JSON 状态文件只能由一个主服务或 worker 持有；停止旧进程后再迁移，避免多进程覆盖数据或重复提醒。
 
 ## Vercel 部署
 
-`vercel.json` 将 Vite 页面与 `api/index.ts` 只读 API 部署到同一个项目。云端构建设置 `VITE_LP_RUNTIME=cloud`，提供地址查仓、Top 50 样本与用户点击触发的 AI 分析。云端和本地均使用策略 Agent 主界面；本地继续保留 JSON、监控轮询与 DWS 兼容能力，独立 NFT 查询和钱包交易页面已移除。部署包排除运行数据、环境文件和个人知识库。
+`vercel.json` 将 Vite 页面与 `api/index.ts` 只读 API 部署到同一个项目。云端构建设置 `VITE_LP_RUNTIME=cloud`，提供地址查仓与 Top 50 样本，不提供线上 AI 分析。云端和本地均使用策略 Agent 主界面；本地继续保留 JSON、监控轮询与 DWS 兼容能力，独立 NFT 查询和钱包交易页面已移除。部署包排除运行数据、环境文件和个人知识库。
 
-云端默认模型为 `openai/gpt-6-luna`，使用 Vercel OIDC 接入 AI Gateway。需要团队具备可用额度及对应模型权限。平台返回 `customer_verification_required` 时，团队所有者需要在 Vercel 添加有效付款方式，页面会显示具体开通要求。查询与分析分配到不同实例时，后端根据固定来源和 NFT 标识直接刷新 Revert，并再次核对 `real_owner`。模型输入仍只包含脱敏事实。
-
-`vercel.json` 中 `LP_PORTFOLIO_AI_PROVIDER=disabled`，查仓与历史样本可独立使用。同机浏览器可以连接本机 Codex API；未连接时，页面引导修复。AI Gateway 完成团队验证后，可将该值改为 `gateway` 并重新部署，再验收真实模型返回。
+`vercel.json` 中 `LP_PORTFOLIO_AI_PROVIDER=disabled`。同机浏览器仍可连接本机 Codex API；这项分析运行在用户自己的电脑上，未连接时页面引导修复。
 
 ```sh
 vercel deploy --prod --skip-domain --scope ytu94s-projects
-# 检查部署页面、查仓、Top 50 和真实 AI 响应后执行
+# 检查部署页面、查仓、Top 50 和禁用状态后执行
 vercel promote <已验证的部署URL> --scope ytu94s-projects
 ```
 
-云端 POST 保持同源和 JSON 校验，API 只挂载数据与分析路由。AI Gateway 的 [OIDC 认证](https://vercel.com/docs/ai-gateway/authentication-and-byok/oidc) 使用项目运行时身份。
+云端 POST 保持同源和 JSON 校验，API 只挂载数据与分析路由。
 
 ## 2026-11-07 历史缺口回填验收
 

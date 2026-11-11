@@ -55,6 +55,8 @@ export interface StrategyPlan {
   candidates: StrategyCandidate[];
   status: "observing" | "ready" | "blocked" | "simulated";
   checks: { label: string; passed: boolean }[];
+  modelUsage?: import("./model.js").ModelUsage;
+  usageSaved?: boolean;
   simulation?: {
     at: string;
     price: number;

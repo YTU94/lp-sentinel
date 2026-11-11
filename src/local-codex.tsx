@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LoaderCircle, Wrench } from "lucide-react";
+import { LoaderCircle, RefreshCw, Wrench } from "lucide-react";
 import { localCodexLaunchUrl, localCodexUrl, type LocalCodexStatus } from "../shared/local-codex";
 import type { PortfolioAdvice, PortfolioSourceId } from "../shared/portfolio";
 import "./local-codex.css";
@@ -21,7 +21,7 @@ function readStatus(value: unknown): LocalCodexStatus {
   return data;
 }
 
-export function useLocalCodex() {
+export function useLocalCodex(enabled = true) {
   const [status, setStatus] = useState<LocalCodexStatus>();
   const [checked, setChecked] = useState(false);
   const [repairing, setRepairing] = useState(false);
@@ -47,6 +47,7 @@ export function useLocalCodex() {
   }, []);
 
   useEffect(() => {
+    if (!enabled) return;
     alive.current = true;
     let timer: number;
     const poll = async () => { await check(); if (alive.current) timer = window.setTimeout(poll, 10_000); };
@@ -54,7 +55,7 @@ export function useLocalCodex() {
     void poll();
     document.addEventListener("visibilitychange", visible);
     return () => { alive.current = false; window.clearTimeout(timer); document.removeEventListener("visibilitychange", visible); healthAbort.current?.abort(); healthAbort.current = null; repairAbort.current?.abort(); };
-  }, [check]);
+  }, [check, enabled]);
 
   const repair = async () => {
     if (repairingRef.current) return;
@@ -94,11 +95,30 @@ export function useLocalCodex() {
   return { status, checked, repairing, message, ready: !repairing && status?.phase === "ready", check, repair, analyze };
 }
 
-export function LocalCodexConnection({ connection }: { connection: ReturnType<typeof useLocalCodex> }) {
-  const phase = connection.repairing ? "checking" : connection.status?.phase ?? (connection.checked ? "offline" : "checking");
+export function LocalCodexConnection({ connection, developmentConnection }: {
+  connection: ReturnType<typeof useLocalCodex>;
+  developmentConnection?: { checking: boolean; available: boolean; label: string; check: () => void };
+}) {
+  const checking = developmentConnection ? developmentConnection.checking : connection.repairing;
+  let phase: LocalCodexStatus["phase"] | "offline" = connection.status?.phase ?? (connection.checked ? "offline" : "checking");
+  if (developmentConnection) phase = checking ? "checking" : developmentConnection.available ? "ready" : "error";
+  else if (connection.repairing) phase = "checking";
   const labels = { checking: "本机 Codex 检测中", ready: "本机 Codex ready", offline: "本机 API 未连接", "needs-login": "本机 Codex 待登录", "missing-cli": "本机 CLI 未安装", error: "本机 Codex 待修复" };
+  const title = developmentConnection
+    ? "每 10 秒检测本地分析服务及所选模型配置；实际调用请在模型设置中测试"
+    : connection.status ? `${connection.status.message} · ${new Date(connection.status.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })}` : "每 10 秒检测这台电脑的本机 API";
+  const action = developmentConnection ? "检测" : "修复";
   return <div className="local-codex-connection">
-    <div className="local-codex-line"><span className={`local-codex-status ${phase}`} role="status" title={connection.status ? `${connection.status.message} · ${new Date(connection.status.checkedAt).toLocaleTimeString("zh-CN", { hour12: false })}` : "每 10 秒检测这台电脑的本机 API"}>{phase === "checking" ? <LoaderCircle size={12} className="spin" /> : <i aria-hidden="true" />}{labels[phase]}</span><button type="button" onClick={() => void connection.repair()} disabled={connection.repairing} aria-label="修复本机 Codex 连接"><Wrench size={12} />{connection.repairing ? "修复中" : "修复"}</button></div>
-    {(connection.message || phase === "needs-login" || phase === "missing-cli") && <p className="local-codex-message" role="alert">{connection.message || connection.status?.message}</p>}
+    <div className="local-codex-line">
+      <span className={`local-codex-status ${phase}`} role="status" title={title}>
+        {phase === "checking" ? <LoaderCircle size={12} className="spin" /> : <i aria-hidden="true" />}
+        {developmentConnection && !checking ? developmentConnection.available ? "本地 Codex 已登录" : developmentConnection.label : labels[phase]}
+      </span>
+      <button type="button" onClick={developmentConnection ? developmentConnection.check : () => void connection.repair()} disabled={checking} aria-label={developmentConnection ? "重新检测本地分析服务" : "修复本机 Codex 连接"}>
+        {developmentConnection ? <RefreshCw size={12} /> : <Wrench size={12} />}
+        {checking ? `${action}中` : action}
+      </button>
+    </div>
+    {!developmentConnection && (connection.message || phase === "needs-login" || phase === "missing-cli") && <p className="local-codex-message" role="alert">{connection.message || connection.status?.message}</p>}
   </div>;
 }

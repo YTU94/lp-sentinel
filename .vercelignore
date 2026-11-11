@@ -1,4 +1,6 @@
 data/
+**/agent-models.json
+**/agent-models.json.*.tmp
 .env
 .env.*
 !.env.example

@@ -1,13 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { AgentEvent, AgentState, AgentView, MarketContext, StrategyPlan } from "../../shared/agent.js";
+import type { AgentEvent, AgentPolicy, AgentState, AgentView, MarketContext, StrategyPlan } from "../../shared/agent.js";
 import type { AppData, JsonStore } from "../store.js";
 import { marketContext, readPolicy, riskChecks, rulePlan, strategyCandidates } from "./strategy.js";
 import { modelConfigured, modelPlan } from "./planner.js";
+import { modelConfig } from "./model-config.js";
+import { modelStatus } from "./model-service.js";
+
+export const defaultAgentPolicy: AgentPolicy = { enabled: true, planner: "rules", cooldownSeconds: 900, maxCostBps: 30, maxPriceDriftBps: 100 };
 
 function agentState(data: AppData): AgentState {
   return data.agent ??= {
-    policy: { enabled: true, planner: "rules", cooldownSeconds: 900, maxCostBps: 30, maxPriceDriftBps: 100 },
+    policy: { ...defaultAgentPolicy },
     events: [], plans: [], observed: {}, lastSimulatedAt: {},
   };
 }
@@ -105,9 +109,13 @@ export class StrategyAgent {
   }
 
   async configure(input: unknown) {
+    if (input && typeof input === "object" && (input as { planner?: unknown }).planner === "model") {
+      const status = await modelStatus();
+      if (!status.available) throw new Error(status.label);
+    }
     await this.update(state => {
       const next = readPolicy(input, state.policy);
-      if (next.planner === "model" && !modelConfigured()) throw new Error("请先配置 AI_GATEWAY_API_KEY 和 LP_AGENT_MODEL");
+      if (next.planner === "model" && !modelConfigured()) throw new Error("请先完成模型设置");
       state.policy = next;
     });
     await this.observe();
@@ -165,12 +173,14 @@ export class StrategyAgent {
           const trace = async (step: string, detail: string) => this.update(next => { next.events.find(e => e.id === event.id)!.trace.push({ step, detail, at: new Date().toISOString() }); });
           const checks = riskChecks(event.context, state.policy, state.lastSimulatedAt[event.context.positionId]);
           const useModel = state.policy.planner === "model" && checks.every(c => c.passed);
+          const modelRevision = modelConfig.revision;
           const decision = useModel ? await modelPlan(event, state.plans, trace) : rulePlan(event.context);
           await this.update((next, data) => {
             const latest = data.positions.find(p => p.id === event.context.positionId);
             const context = event.context.demo ? event.context : latest ? marketContext(latest) : { ...event.context, enabled: false };
             const finalChecks = riskChecks(context, next.policy, next.lastSimulatedAt[context.positionId]);
             finalChecks.push({ label: "评估期间策略设置未改变", passed: JSON.stringify(state.policy) === JSON.stringify(next.policy) });
+            if (useModel) finalChecks.push({ label: "评估期间模型设置未改变", passed: modelRevision === modelConfig.revision });
             finalChecks.push({ label: "评估期间行情状态和区间未改变", passed: context.zone === event.context.zone && context.lower === event.context.lower && context.upper === event.context.upper && Math.abs(context.price / event.context.price - 1) * 10000 <= next.policy.maxPriceDriftBps });
             const plan: StrategyPlan = {
               id: randomUUID(), eventId: event.id, createdAt: new Date().toISOString(), context: event.context,

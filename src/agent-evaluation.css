@@ -1,0 +1,47 @@
+.agent-evaluation { margin: 0 0 20px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.evaluation-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.evaluation-heading h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
+.evaluation-heading p, .evaluation-note, .evaluation-plan p, .evaluation-result-heading p { margin: 7px 0 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+.evaluation-heading button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 38px; white-space: nowrap; }
+.evaluation-note { margin-top: 12px; }
+.evaluation-status { margin: 12px 0 0; color: var(--sea); font-size: 12px; }
+.evaluation-plan, .evaluation-cases { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.evaluation-plan summary, .evaluation-cases > summary, .evaluation-case summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+.evaluation-plan ul, .evaluation-case ul { list-style: none; padding: 0; margin: 12px 0; }
+.evaluation-plan li { display: grid; grid-template-columns: minmax(100px, 160px) 1fr; gap: 8px; padding: 6px 0; font-size: 12px; line-height: 1.5; }
+.evaluation-plan li span { color: var(--muted); }
+.evaluation-result { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.evaluation-result h3 { margin: 0; font-size: 15px; }
+.evaluation-summary { display: grid; grid-template-columns: minmax(260px, 420px) minmax(220px, 1fr); gap: 24px; align-items: center; margin-top: 8px; }
+.evaluation-radar { width: 100%; max-width: 420px; height: auto; overflow: visible; }
+.evaluation-radar text { fill: var(--ink); font-size: 13px; }
+.evaluation-grid, .evaluation-axis { fill: none; stroke: var(--line); stroke-width: 1; }
+.evaluation-shape { fill: #1f766f; fill-opacity: .16; stroke: #1f766f; stroke-width: 2; }
+.evaluation-point { fill: #1f766f; }
+.evaluation-summary dl { margin: 0; font-variant-numeric: tabular-nums; }
+.evaluation-summary dl div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+.evaluation-summary dt small { display: block; margin-top: 3px; color: var(--muted); }
+.evaluation-summary dd { margin: 0; white-space: nowrap; font-weight: 650; }
+.evaluation-recommendations { margin-top: 12px; }
+.evaluation-recommendations h4 { margin: 0 0 8px; font-size: 13px; }
+.evaluation-recommendations ul { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.75; }
+.evaluation-case { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.evaluation-case summary { display: flex; justify-content: space-between; gap: 12px; }
+.evaluation-case summary > span { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.evaluation-case summary svg { flex-shrink: 0; }
+.evaluation-case[open] summary svg { transform: rotate(90deg); }
+.evaluation-case summary small { color: var(--muted); font-weight: 400; }
+.evaluation-case summary strong { color: var(--sea); white-space: nowrap; }
+.evaluation-case summary strong.failed, .evaluation-case summary strong.incomplete { color: var(--alert); }
+.evaluation-evidence { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.7; }
+.evaluation-case li { display: grid; gap: 4px; padding: 7px 0; font-size: 12px; line-height: 1.55; }
+.evaluation-case li span { color: var(--muted); }
+.agent-evaluation summary:focus-visible, .agent-evaluation button:focus-visible { outline: 3px solid var(--sea); outline-offset: 3px; }
+@media (max-width: 700px) {
+  .evaluation-heading { flex-wrap: wrap; }
+  .evaluation-heading button { min-height: 44px; }
+  .evaluation-summary { grid-template-columns: 1fr; gap: 8px; }
+  .evaluation-radar { justify-self: center; }
+  .evaluation-radar text { font-size: 15px; }
+  .evaluation-plan li { grid-template-columns: 1fr; gap: 2px; }
+}

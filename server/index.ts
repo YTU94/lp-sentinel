@@ -14,22 +14,39 @@ import { detectLpNft, readLpNftBySource } from "./services/lp-nft-registry.js";
 import type { LpSourceId } from "./domain/live-lp.js";
 import { StrategyAgent } from "./agent/runtime.js";
 import { agentRoutes } from "./agent/routes.js";
+import { PortfolioWatch } from "./agent/portfolio-watch.js";
+import { AgentEvaluation } from "./agent/evaluation.js";
+import { modelConfig } from "./agent/model-config.js";
+import { SampleCollector } from "./agent/samples.js";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const store = new JsonStore(process.env.LP_SENTINEL_DATA_FILE || path.join(root, "data", "lp-sentinel.json"));
+const dataFile = process.env.LP_SENTINEL_DATA_FILE || path.join(root, "data", "lp-sentinel.json");
+const store = new JsonStore(dataFile);
 await store.load();
+const sampleStore = new JsonStore(`${dataFile}.samples.json`);
+let samples: SampleCollector | undefined;
+try {
+  await sampleStore.load();
+  samples = new SampleCollector(sampleStore);
+  samples.start();
+} catch { console.warn("本地样本文件无法读取，已保留原文件；其他功能不受影响。"); }
+await modelConfig.load().catch(() => console.warn("模型配置暂不可用，请检查本地配置文件"));
+const evaluation = new AgentEvaluation(store);
+await evaluation.recover();
 
 const agent = new StrategyAgent(store);
 await agent.start();
+const portfolioWatch = new PortfolioWatch(store);
+await portfolioWatch.start();
 const monitor = new PositionMonitor(store, undefined, () => agent.observe());
 monitor.start();
 
 const app = express();
 app.use(express.json());
-app.use("/api/agent", agentRoutes(agent));
+app.use("/api/agent", agentRoutes(agent, portfolioWatch, evaluation, samples));
 
 app.get("/api/state", async (_request, response) => {
-  const { agent: _agent, ...state } = store.snapshot;
+  const { agent: _agent, portfolioWatch: _portfolioWatch, evaluation: _evaluation, ...state } = store.snapshot;
   response.json({ ...state, dws: await getDwsIdentity(), serverTime: new Date().toISOString() });
 });
 
@@ -160,4 +177,4 @@ app.listen(port, "127.0.0.1", () => {
   console.log(`LP Sentinel API: http://127.0.0.1:${port}`);
 });
 
-process.on("SIGTERM", () => { monitor.stop(); agent.stop(); });
+process.on("SIGTERM", () => { monitor.stop(); agent.stop(); portfolioWatch.stop(); samples?.stop(); });

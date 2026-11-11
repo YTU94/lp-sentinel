@@ -2,6 +2,9 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { Position } from "./domain/position.js";
 import type { AgentState } from "../shared/agent.js";
+import type { PortfolioWatchState } from "../shared/portfolio.js";
+import type { EvaluationReport } from "../shared/evaluation.js";
+import type { SampleState } from "../shared/samples.js";
 
 export interface Settings {
   pollIntervalSeconds: number;
@@ -14,6 +17,9 @@ export interface AppData {
   positions: Position[];
   settings: Settings;
   agent?: AgentState;
+  portfolioWatch?: PortfolioWatchState;
+  evaluation?: EvaluationReport;
+  samples?: SampleState;
 }
 
 const defaultData: AppData = {

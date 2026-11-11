@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 export interface NotificationInput {
   userId: string;
@@ -88,4 +90,31 @@ export async function sendNotification(input: NotificationInput): Promise<Notifi
     }
   }
   return { chatSent: true, dingSent, callSent, dingError: errors.length ? errors.join("；") : undefined };
+}
+
+const executeDws = promisify(execFile);
+
+function responseObjects(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(responseObjects);
+  if (!value || typeof value !== "object") return [];
+  const object = value as Record<string, unknown>;
+  return [object, ...responseObjects(object.data), ...responseObjects(object.result)];
+}
+
+export async function sendPortfolioNotification(profile: string, openId: string, message: string, eventId: string, taskId?: string) {
+  const args = taskId
+    ? ["chat", "+messages-query-send-status", "--open-task-id", taskId]
+    : ["chat", "message", "send", "--open-dingtalk-id", openId, "--title", "LP 出区间提醒", "--content", message, "--idempotency-key", eventId];
+  let result: Record<string, unknown>;
+  try {
+    const { stdout } = await executeDws("dws", [...args, "--profile", profile, "--timeout", "15", "--format", "json"], { timeout: 20_000, maxBuffer: 128_000 });
+    result = JSON.parse(stdout) as Record<string, unknown>;
+  } catch { throw new Error(taskId ? "钉钉投递状态查询失败，请检查登录和网络" : "钉钉发送结果未知，请检查登录、权限和网络"); }
+  const objects = responseObjects(result);
+  if (objects.some(item => item.ok === false || item.success === false || item.outcome === "failure")) throw new Error("钉钉未接受消息，请检查登录和消息权限");
+  const status = objects.map(item => item.sendStatus).find(value => typeof value === "string");
+  if (status === "SUCCESS") return { state: "sent" as const, taskId };
+  if (status && ["FAIL", "FAILED", "FAILURE"].includes(String(status))) throw new Error("钉钉消息投递失败，请检查消息权限");
+  const returnedTask = objects.map(item => item.openTaskId).find(value => typeof value === "string" && value.length > 0) as string | undefined;
+  return { state: returnedTask || taskId ? "pending" as const : "uncertain" as const, taskId: returnedTask || taskId };
 }

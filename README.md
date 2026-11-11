@@ -83,7 +83,11 @@ NODE_ENV=production npm start
 
 地址查询使用 Revert 索引，`base-aerodrome` 聚合 `aero / aerodrome / aerodromev2 / aerodromev3` 四个 CL 部署及其识别的质押归属。各来源逐页返回，错误、停止和索引过期分别提示。来源、绩效字段和接入范围见[地址查询说明](docs/wallet-agent.md)。
 
-本机 Codex 接入使用独立的 loopback API。macOS 首次运行 `npm run codex:install` 安装启动器并验证 ready，也可运行 `npm run codex:bridge` 从终端启动。页面标题右侧每 10 秒显示连接状态，并提供“修复”入口。安装启动器的这台电脑可在正式页面使用本机 CLI 分析，完整启动方式与浏览器权限说明见[本机 Codex API](docs/wallet-agent.md#本机-codex-api-与启动器)。
+运行 `npm run dev` 后，从右上角「Agent 菜单」分别打开「模型与运行」「Agent 测评」和「样本数据」。模型页面支持本机 Codex、DeepSeek、GLM 和 OpenAI 兼容接口；远程模型密钥可在本地填写，服务端明文保存在权限为 0600 的文件中。地址建议、自动提醒与事件策略使用所选模型；测评仍固定使用本机 Codex。详细配置见[地址查询说明](docs/wallet-agent.md#本机-api-与配置)。
+
+样本页面每天北京时间 08:10 更新首页最近一次成功查询钱包的 Uniswap V3 近 30 日历史，钱包历史不可用时回退到 TVL Top 50；数据保存在本机 JSON，服务停机后暂停并在重启时补采。来源、覆盖和缺口以页面实际结果为准。详见[每日样本概览](docs/wallet-agent.md#每日样本概览)。
+
+线上页面连接这台电脑时使用独立的 loopback API。macOS 首次运行 `npm run codex:install` 安装启动器并验证 ready，也可运行 `npm run codex:bridge` 从终端启动。完整启动方式与浏览器权限说明见[本机 Codex API](docs/wallet-agent.md#本机-codex-api-与启动器)。
 
 选中 LP 后可查看按北京时间分天的 24 小时有效区间图。历史优先采用 Revert 快照，缺口通过池价事件和 NFT 流动性状态回放校准，同时展示每日历史覆盖率与事件校准时长。派生结果使用 5 分钟内存缓存，读取失败的时段保留缺口，并支持主动重试。回放需要支持历史调用与日志的 RPC，配置和精度口径见[每日有效区间说明](docs/wallet-agent.md#每日有效区间时间)。
 

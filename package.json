@@ -8,6 +8,7 @@
     "dev": "concurrently -k -n api,web -c magenta,cyan \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc -b && vite build",
     "start": "tsx server/index.ts",
+    "watch:worker": "tsx server/portfolio-worker.ts",
     "codex:bridge": "node scripts/start-local-codex.mjs",
     "codex:install": "node scripts/install-local-codex.mjs",
     "research": "node --import tsx server/research/cli.ts",
@@ -15,9 +16,12 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "3.0.87",
     "@vitejs/plugin-react": "latest",
+    "ai": "7.0.165",
     "express": "latest",
     "lucide-react": "latest",
+    "openevals": "0.2.3",
     "react": "latest",
     "react-dom": "latest",
     "viem": "^2.56.2",
@@ -35,5 +39,9 @@
     "tsx": "latest",
     "typescript": "latest",
     "vitest": "latest"
+  },
+  "overrides": {
+    "zod": "^4.6.7",
+    "undici": "^8.12.4"
   }
 }

@@ -122,9 +122,17 @@ export interface PortfolioPage {
   blockNumber?: string;
 }
 
+export interface PortfolioStrategyOption {
+  action: "hold" | "recenter" | "reduce";
+  summary: string;
+  strategy: string;
+  trigger: string;
+}
+
 export interface PortfolioAdvice {
+  options: { conservative: PortfolioStrategyOption; aggressive: PortfolioStrategyOption };
   positionKey: string;
-  provider: "codex" | "gateway" | "rules";
+  provider: "codex" | "gateway" | "deepseek" | "glm" | "compatible" | "rules";
   action: "hold" | "recenter" | "reduce";
   summary: string;
   strategy?: string;
@@ -134,10 +142,51 @@ export interface PortfolioAdvice {
   nextSteps: string[];
   createdAt: string;
   snapshot: PortfolioPosition;
+  modelUsage?: import("./model.js").ModelUsage;
+  usageSaved?: boolean;
 }
 
 export interface PortfolioAiStatus {
-  provider: "codex" | "gateway" | "unavailable";
+  provider: "codex" | "gateway" | "deepseek" | "glm" | "compatible" | "unavailable";
   available: boolean;
   label: string;
+}
+
+export type WatchAdvice = Pick<PortfolioAdvice, "provider" | "action" | "summary" | "strategy" | "trigger" | "reasons" | "risks" | "nextSteps" | "createdAt"> & { options?: PortfolioAdvice["options"] };
+
+export interface PortfolioWatchPosition {
+  key: string;
+  sourceId: PortfolioSourceId;
+  network: string;
+  pair: string;
+  tokenId?: string;
+  status: "in-range" | "outside" | "empty" | "unknown";
+  observedAt?: string;
+  snapshotAt?: string;
+  outsideSince?: string;
+  snapshotSince?: string;
+  eventId?: string;
+  confirmedAt?: string;
+  verifiedAt?: string;
+  delivery: "none" | "analyzing" | "waiting" | "sending" | "pending" | "sent" | "uncertain";
+  alerted: boolean;
+  advice?: WatchAdvice;
+  taskId?: string;
+  deliveryProfile?: string;
+  retryAt?: string;
+  error?: string;
+}
+
+export interface PortfolioWatchState {
+  enabled: boolean;
+  address: string;
+  sessionId: string;
+  positions: Record<string, PortfolioWatchPosition>;
+  sources: Partial<Record<PortfolioSourceId, { checkedAt: string; error?: string }>>;
+}
+
+export interface PortfolioWatchView {
+  watch?: PortfolioWatchState;
+  dwsReady: boolean;
+  dwsMessage?: string;
 }

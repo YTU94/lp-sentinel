@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
-import { Bell, BellRing, CircleAlert, PhoneCall, Radar, RefreshCw, Settings2, ShieldCheck, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Bell, BellRing, ChevronDown, CircleAlert, Cpu, Database, PhoneCall, Radar, RefreshCw, Settings2, ShieldCheck, X } from "lucide-react";
 import { api } from "./api";
 import type { AppState, Settings } from "./types";
 import { PortfolioAgent } from "./portfolio-agent";
+import { agentPageFromHash, agentPages } from "./agent-pages";
 
 export default function App() {
   const cloud = import.meta.env.VITE_LP_RUNTIME === "cloud";
@@ -12,6 +13,9 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menu = useRef<HTMLDivElement | null>(null);
+  const menuButton = useRef<HTMLButtonElement | null>(null);
 
   const load = async (quiet = false) => {
     try {
@@ -42,6 +46,19 @@ export default function App() {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [panel]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOutside = (event: PointerEvent) => { if (!menu.current?.contains(event.target as Node)) setMenuOpen(false); };
+    const closeEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.stopPropagation(); setMenuOpen(false); menuButton.current?.focus(); }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeEscape); };
+  }, [menuOpen]);
+
+  const icons = { model: Cpu, evaluation: Radar, samples: Database };
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -56,11 +73,25 @@ export default function App() {
           {cloud ? "Top 50 历史样本" : state?.settings.dingCallEnabled ? <><PhoneCall size={15} /> 电话 DING</> : state?.settings.dingEnabled ? <><BellRing size={15} /> DING 已开启</> : <><Bell size={15} /> 普通提醒</>}
         </div>
         <div className="top-actions">
+          <div className="agent-menu" ref={menu} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMenuOpen(false); }}>
+            <button ref={menuButton} className="agent-menu-trigger" type="button" aria-expanded={menuOpen} aria-controls="agent-menu-links" onClick={() => { setPanel(null); setMenuOpen(value => !value); }}>
+              Agent 菜单 <ChevronDown size={14} aria-hidden="true" />
+            </button>
+            <nav className="agent-menu-links" id="agent-menu-links" aria-label="Agent 功能" hidden={!menuOpen}>
+              {agentPages.filter(item => !cloud || !item.localOnly).map(item => {
+                const Icon = icons[item.id];
+                return <a href={item.href} key={item.id} onClick={() => {
+                  if (agentPageFromHash(window.location.hash, !cloud) === item.id) menuButton.current?.focus();
+                  setMenuOpen(false);
+                }}><Icon size={17} aria-hidden="true" /><span><strong>{item.label}</strong><small>{cloud && item.id === "samples" ? "Uniswap Top 50 历史样本" : item.description}</small></span></a>;
+              })}
+            </nav>
+          </div>
           {cloud ? <span className="portfolio-readonly"><ShieldCheck size={14} />云端只读</span> : <>
           <button className="icon-button refresh-button" disabled={refreshing} onClick={async () => { setRefreshing(true); try { await api.refresh(); await load(true); } finally { setRefreshing(false); } }} aria-label="立即刷新行情">
             <RefreshCw size={18} className={refreshing ? "spin" : ""} />
           </button>
-          <button className="icon-button" onClick={() => setPanel("settings")} aria-label="报警设置"><Settings2 size={18} /></button>
+          <button className="icon-button" onClick={() => { setMenuOpen(false); setPanel("settings"); }} aria-label="报警设置"><Settings2 size={18} /></button>
           </>}
         </div>
       </header>

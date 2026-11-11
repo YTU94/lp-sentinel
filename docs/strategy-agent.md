@@ -28,7 +28,7 @@ flowchart LR
   RPC[现有 RPC 监控] --> Snapshot[仓位快照]
   Snapshot --> Observer[变化检测 / 过期看门狗]
   Observer --> Inbox[本地持久化任务队列]
-  Inbox --> Planner[规则 / 有界模型工具循环]
+  Inbox --> Planner[规则 / 模型与只读上下文]
   Memory[近期决策与成本复盘] --> Planner
   Planner --> Risk[代码风控]
   Risk --> Review[界面审阅与成本假设]
@@ -44,13 +44,9 @@ flowchart LR
 
 ## 模型与工具
 
-默认 `rules` 模式无需 API Key，并明确标记为规则判断。启用模型时：
+默认 `rules` 模式无需 API Key，并明确标记为规则判断。启用模型时，先从右上角「Agent 菜单」进入「模型与运行」，选择并测试 Codex、DeepSeek、GLM 或兼容接口，再回到首页的「策略设置与执行边界」切换「模型模式」。密钥存储和费用说明见[地址 Agent 配置](wallet-agent.md#本机-api-与配置)。
 
-1. 复制 `.env.example` 为 `.env`，填写 `AI_GATEWAY_API_KEY` 和 `LP_AGENT_MODEL`。不要提交凭据。
-2. 使用 `node --env-file=.env --import tsx server/index.ts` 启动后端，另开终端运行 `npx vite`。普通 `npm run dev` 不自动读取 `.env` 到后端，也可在 shell 中预设这些变量。
-3. 在 Agent 的「策略设置与执行边界」切换「模型工具模式」。开启前界面会说明哪些数据将发送给模型服务。
-
-模型通过 AI Gateway 的 Chat Completions 工具调用接口运行，最多 4 轮、整次调用超时 25 秒。工具只有 `get_market_context`、`compare_strategies`、`get_recent_decisions` 和 `submit_plan`。提交前必须读取行情与策略候选，返回动作与理由经过本地校验。模型不能调用任意 URL、Shell、钱包或修改风险阈值。失效行情直接进入规则拦截流程；有效行情的模型调用失败会显式失败，不伪装成模型成功。
+服务端一次性准备脱敏行情、本地候选策略和最近五条决策，使用统一模型接口取得结构化动作和理由，再由代码校验和独立风控。模型没有可调用工具，不能访问任意 URL、Shell、钱包或修改风险阈值。评估期间模型配置发生变化时计划被阻断。失效行情直接进入规则拦截流程；有效行情的模型调用失败会显式失败，不伪装成模型成功。
 
 决策记忆是最近 5 条同仓位建议及成本复盘，不是训练模型或经过收益验证的自我优化。
 
@@ -71,6 +67,9 @@ flowchart LR
 | 方法 | 路径 | 行为 |
 | --- | --- | --- |
 | GET | `/api/agent` | 配置、最近事件与计划、模型是否已配置 |
+| GET | `/api/agent/runtime` | 服务端心跳、地址监控与事件策略状态 |
+| GET / PUT | `/api/agent/model-settings` | 读取脱敏配置和保存模型设置 |
+| POST | `/api/agent/model-settings/test` | 显式连接测试 |
 | GET | `/api/agent/stream` | SSE `state` 事件，重连时发送当前快照 |
 | PATCH | `/api/agent/policy` | 部分更新 enabled / planner / cooldownSeconds / maxCostBps / maxPriceDriftBps |
 | POST | `/api/agent/review/:positionId` | 评估已有仓位，JSON `{}` |
